@@ -1,9 +1,9 @@
-/* 한수 v0.7.0 오프라인 가족 계정 — 캐시 범위 제한 및 오프라인 대응 */
+/* 한수 v0.7.0 — 캐시 범위 제한 및 오프라인 대응 */
 'use strict';
 
 const CACHE_PREFIX = 'hansu-board-arena-';
-const CACHE_NAME = 'hansu-board-arena-v0.7.0';
-const LEGACY_CACHE_NAMES = ['hansu-v0.6.0', 'hansu-board-arena-v0.6.3'];
+const CACHE_NAME = 'hansu-board-arena-v0.7.1';
+const LEGACY_CACHE_NAMES = ['hansu-v0.6.0', 'hansu-board-arena-v0.6.3', 'hansu-board-arena-v0.7.0'];
 const APP_SHELL = [
   './',
   './index.html',

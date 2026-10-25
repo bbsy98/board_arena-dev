@@ -1,7 +1,7 @@
 {
   "name": "hansu-board-arena",
   "version": "0.7.0",
-  "description": "한수 - 오프라인 가족용 보드게임",
+  "description": "한수 - 보드게임 학습 앱",
   "private": true,
   "main": "desktop/main.cjs",
   "scripts": {
