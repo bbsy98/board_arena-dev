@@ -1,6 +1,8 @@
 (() => {
   'use strict';
+  let latestError = '';
   function showError(message) {
+    latestError = String(message || 'unknown').slice(0, 12000);
     if (document.getElementById('appErrorBar')) return;
     const bar = document.createElement('div');
     bar.id = 'appErrorBar';
@@ -10,15 +12,21 @@
     const copy = document.createElement('button');
     copy.textContent = '오류 정보 복사'; copy.style.marginLeft = '10px';
     copy.onclick = async () => {
-      const report = ['한수 v0.6 오류', location.href, navigator.userAgent, message].join('\n');
+      const report = ['한수 v0.7.0 오류', location.href, navigator.userAgent, latestError].join('\n');
       try { await navigator.clipboard.writeText(report); copy.textContent = '복사됨'; }
       catch (_) { prompt('아래 내용을 복사해 주세요.', report); }
     };
     const close = document.createElement('button'); close.textContent='닫기'; close.style.marginLeft='6px'; close.onclick=()=>bar.remove();
     bar.append(text, copy, close); document.body.appendChild(bar);
   }
-  window.addEventListener('error', e => showError((e.message || 'unknown') + ' @ ' + (e.filename || '') + ':' + (e.lineno || '')));
-  window.addEventListener('unhandledrejection', e => showError(String(e.reason && e.reason.message || e.reason || 'Promise rejection')));
+  window.addEventListener('error', e => {
+    const stack = e.error && e.error.stack ? '\n' + e.error.stack : '';
+    showError((e.message || 'unknown') + ' @ ' + (e.filename || '') + ':' + (e.lineno || '') + ':' + (e.colno || '') + stack);
+  });
+  window.addEventListener('unhandledrejection', e => {
+    const reason = e.reason;
+    showError(String(reason && reason.message || reason || 'Promise rejection') + (reason && reason.stack ? '\n' + reason.stack : ''));
+  });
   window.addEventListener('storage', e => {
     if (e.key === 'boardArena.v3' && document.visibilityState === 'visible') {
       const n = document.createElement('div');

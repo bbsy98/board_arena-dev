@@ -26,28 +26,105 @@ const SafeStore = (() => {
 // ---------- 저장소 ----------
 const Store = {
   KEY: 'boardArena.v3', data: null,
+  // Stored data and imported backups are user-controlled input. Normalize every
+  // nested object before the UI interpolates values into HTML.
+  object(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; },
+  count(value, max = 1000000000) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, Math.min(max, Math.floor(n))) : 0;
+  },
+  level(value, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : fallback;
+  },
   load() {
-    try { this.data = JSON.parse(SafeStore.local.get(this.KEY)) || null; } catch (e) { this.data = null; }
-    if (!this.data || !this.data.users) this.data = { users: {}, session: null, fails: {} };
-    this.data.fails = this.data.fails || {};
-    Object.values(this.data.users).forEach(u => this.migrate(u));
+    let parsed = null;
+    try { parsed = JSON.parse(SafeStore.local.get(this.KEY) || 'null'); } catch (e) { console.warn('한수 저장 데이터 파싱 실패; 안전한 빈 저장소로 시작합니다.', e); }
+    const root = this.object(parsed);
+    const users = this.object(root.users);
+    const safeUsers = {};
+    Object.keys(users).forEach(key => {
+      if (!/^[a-z0-9]{4,16}$/.test(key)) return;
+      const user = users[key];
+      if (!user || typeof user !== 'object' || Array.isArray(user)) return;
+      safeUsers[key] = this.migrate(user);
+    });
+    const fails = this.object(root.fails), safeFails = {};
+    Object.keys(fails).filter(k => /^[a-z0-9]{4,16}$/.test(k)).forEach(k => {
+      const f = this.object(fails[k]);
+      safeFails[k] = { n: this.count(f.n, 5), until: this.count(f.until, 8640000000000000) };
+    });
+    this.data = { users: safeUsers, session: typeof root.session === 'string' && /^[a-z0-9]{4,16}$/.test(root.session) ? root.session : null, fails: safeFails };
+    // A stale or malformed session must never prevent the login screen loading.
+    if (this.data.session && !this.data.users[this.data.session]) this.data.session = null;
+    Object.keys(this.data.users).forEach(k => this.data.users[k] = this.migrate(this.data.users[k]));
   },
   migrate(u) {
-    u.prefs = u.prefs || {}; u.prefs.match = u.prefs.match || {}; u.prefs.train = u.prefs.train || {};
-    u.stats = u.stats || {}; u.tut = u.tut || {}; u.log = u.log || []; u.style = u.style || {};
-    if (!u.prefs.ui) u.prefs.ui = 'normal';
+    u = this.object(u);
+    u.id = typeof u.id === 'string' && /^[A-Za-z0-9]{4,16}$/.test(u.id) ? u.id : 'user';
+    u.nick = typeof u.nick === 'string' && u.nick.trim() ? u.nick.trim().slice(0, 12) : u.id;
+    u.prefs = this.object(u.prefs);
+    u.prefs.ui = u.prefs.ui === 'kid' ? 'kid' : 'normal';
+    u.prefs.match = this.object(u.prefs.match); u.prefs.train = this.object(u.prefs.train);
+    u.stats = this.object(u.stats); u.tut = this.object(u.tut); u.style = this.object(u.style);
     GAMES.forEach(g => {
-      if (!u.prefs.match[g]) u.prefs.match[g] = g === 'sudoku' ? 3 : 2;
-      if (!u.prefs.train[g]) u.prefs.train[g] = 1;
-      u.stats[g] = u.stats[g] || {};
-      u.stats[g].match = u.stats[g].match || { w: 0, l: 0, d: 0, best: 0 };
-      u.stats[g].train = u.stats[g].train || { w: 0, l: 0, d: 0 };
-      u.tut[g] = u.tut[g] || [];
+      u.prefs.match[g] = this.level(u.prefs.match[g], g === 'sudoku' ? 3 : 2);
+      u.prefs.train[g] = this.level(u.prefs.train[g], 1);
+      const raw = this.object(u.stats[g]);
+      const match = this.object(raw.match), train = this.object(raw.train);
+      u.stats[g] = {
+        match: { w: this.count(match.w), l: this.count(match.l), d: this.count(match.d), best: this.level(match.best, 1) },
+        train: { w: this.count(train.w), l: this.count(train.l), d: this.count(train.d) }
+      };
+      if (!this.count(match.best, 10)) u.stats[g].match.best = 0;
+      const lessons = Array.isArray(u.tut[g]) ? u.tut[g] : [];
+      const maxLessons = Array.isArray(LESSONS[g]) ? LESSONS[g].length : 100;
+      u.tut[g] = [...new Set(lessons.filter(x => (typeof x === 'number' || (typeof x === 'string' && x.trim() !== '')) && Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) < maxLessons).map(Number))];
+      const a = this.object(u.style[g]);
+      const cleanStyle = {};
+      ['games','moves','caps','checks','adv','think','thinkN','warns','heeded','hints','inputs','memo','mistakes','sec','l3','l4','castled','castleMove','earlyQ'].forEach(k => { cleanStyle[k] = this.count(a[k]); });
+      ['use','pat'].forEach(k => {
+        const map = this.object(a[k]), clean = {};
+        Object.keys(map).slice(0, 40).forEach(key => { if (/^[A-Za-z0-9가-힣_-]{1,24}$/.test(key)) clean[key] = this.count(map[key]); });
+        cleanStyle[k] = clean;
+      });
+      u.style[g] = cleanStyle;
     });
+    const logs = Array.isArray(u.log) ? u.log : [];
+    u.log = logs.slice(0, 300).filter(e => {
+      if (!e || typeof e !== 'object' || !GAMES.includes(e.game) || !['tutorial','train','match'].includes(e.mode) || !['win','loss','draw'].includes(e.result)) return false;
+      return true;
+    }).map(e => ({
+      game: e.game, mode: e.mode, result: e.result,
+      date: this.count(e.date, 8640000000000000) || Date.now(),
+      level: this.level(e.level, 1), endLevel: this.level(e.endLevel, this.level(e.level, 1)),
+      reason: typeof e.reason === 'string' ? e.reason.slice(0, 300) : '',
+      moves: this.count(e.moves, 100000), hints: this.count(e.hints, 100000), warns: this.count(e.warns, 100000)
+    }));
+    u.created = this.count(u.created, 8640000000000000) || Date.now();
+    u.lastBackup = this.count(u.lastBackup, 8640000000000000);
+    u.salt = typeof u.salt === 'string' && /^[0-9a-f]{32}$/i.test(u.salt) ? u.salt.toLowerCase() : null;
+    u.hash = typeof u.hash === 'string' && /^[0-9a-f]{64}$/i.test(u.hash) ? u.hash.toLowerCase() : null;
+    return u;
   },
   save() { try { return SafeStore.local.set(this.KEY, JSON.stringify(this.data)); } catch (e) { return false; } },
-  sessionId() { return SafeStore.sess.get('boardArena.session') || this.data.session; },
-  setSession(id, keep) { if (keep) this.data.session = id; else { this.data.session = null; SafeStore.sess.set('boardArena.session', id); } this.save(); },
+  sessionId() {
+    const tabId = SafeStore.sess.get('boardArena.session');
+    if (tabId && this.data.users[tabId]) return tabId;
+    if (tabId) SafeStore.sess.del('boardArena.session');
+    return this.data.session && this.data.users[this.data.session] ? this.data.session : null;
+  },
+  setSession(id, keep) {
+    if (keep) {
+      this.data.session = id;
+      // A stale tab-only session must not override the newly selected persistent login.
+      SafeStore.sess.del('boardArena.session');
+    } else {
+      this.data.session = null;
+      SafeStore.sess.set('boardArena.session', id);
+    }
+    this.save();
+  },
   clearSession() { this.data.session = null; SafeStore.sess.del('boardArena.session'); this.save(); },
   cur() { const id = this.sessionId(); return id && this.data.users[id] ? this.data.users[id] : null; },
   record(game, mode, result, entry) {
@@ -103,6 +180,7 @@ function pbkdf2Sha256(pw, salt, iter) {
 // ---------- 계정 (비밀번호는 PBKDF2로 해시해서 저장) ----------
 const Auth = {
   async hash(pw, saltHex) {
+    if (typeof saltHex !== 'string' || !/^[0-9a-f]{32}$/i.test(saltHex)) throw new Error('계정의 비밀번호 정보가 손상됐어요. 백업 파일로 복원해 주세요.');
     const salt = new Uint8Array(saltHex.match(/../g).map(h => parseInt(h, 16)));
     const pwb = new TextEncoder().encode(pw);
     try {
@@ -117,14 +195,42 @@ const Auth = {
   },
   salt() {
     const a = new Uint8Array(16);
-    try { crypto.getRandomValues(a); } catch (e) { for (let i = 0; i < 16; i++) a[i] = (Math.random() * 256) | 0; }
+    if (!window.crypto || typeof window.crypto.getRandomValues !== 'function') {
+      throw new Error('안전한 난수 생성 기능을 사용할 수 없어요. 최신 브라우저 또는 HTTPS 환경에서 다시 시도해 주세요.');
+    }
+    window.crypto.getRandomValues(a);
     return toHex(a);
   },
   msg(t, ok) { const m = $('aMsg'); m.textContent = t; m.className = 'amsg' + (ok ? ' ok' : ''); },
   tab(which) {
     $('tabLogin').classList.toggle('on', which === 'login'); $('tabSignup').classList.toggle('on', which === 'signup');
     $('fLogin').classList.toggle('hidden', which !== 'login'); $('fSignup').classList.toggle('hidden', which !== 'signup');
-    this.msg(''); (which === 'login' ? $('liId') : $('suId')).focus();
+    this.msg('');
+    this.renderLocalAccounts();
+    (which === 'login' ? $('liId') : $('suId')).focus();
+  },
+  renderLocalAccounts() {
+    const box = $('localAccounts'), list = $('localAccountsList');
+    if (!box || !list || !Store.data) return;
+    list.replaceChildren();
+    const users = Object.keys(Store.data.users || {}).map(key => ({ key, user: Store.data.users[key] }))
+      .filter(item => item.user && typeof item.user.nick === 'string')
+      .sort((a, b) => a.user.nick.localeCompare(b.user.nick, 'ko'));
+    const show = !$('fLogin').classList.contains('hidden') && users.length > 0;
+    box.classList.toggle('hidden', !show);
+    if (!show) return;
+    users.forEach(({ key, user }) => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'local-account-item';
+      button.setAttribute('aria-label', `${user.nick} 계정 ${user.id} 선택`);
+      const avatar = document.createElement('span'); avatar.className = 'local-account-avatar'; avatar.textContent = (user.nick || user.id || '?').slice(0, 1);
+      const label = document.createElement('span'); label.className = 'local-account-label';
+      const nick = document.createElement('span'); nick.textContent = user.nick || user.id;
+      const id = document.createElement('span'); id.className = 'local-account-id'; id.textContent = '@' + user.id;
+      label.append(nick, id); button.append(avatar, label);
+      button.addEventListener('click', () => { $('liId').value = user.id; $('liPw').value = ''; $('liPw').focus(); this.msg(''); });
+      list.appendChild(button);
+    });
   },
   init() {
     $('tabLogin').onclick = () => this.tab('login');
@@ -216,17 +322,21 @@ const Backup = {
   },
   pick() { $('bkFile').click(); },
   validate(d) {
-    if (!d || d.app !== 'hansu' || d.kind !== 'backup' || !d.user) throw new Error('한수 백업 파일이 아니에요.');
-    if (d.ver > this.VER) throw new Error('더 새로운 버전의 한수에서 만든 백업이에요. 최신 버전에서 불러와 주세요.');
+    if (!d || typeof d !== 'object' || d.app !== 'hansu' || d.kind !== 'backup' || !d.user || typeof d.user !== 'object' || Array.isArray(d.user)) throw new Error('한수 백업 파일이 아니에요.');
+    if (!Number.isInteger(Number(d.ver)) || Number(d.ver) > this.VER || Number(d.ver) < 1) throw new Error('지원하지 않는 백업 버전이에요.');
     const u = d.user;
     if (typeof u.id !== 'string' || !/^[A-Za-z0-9]{4,16}$/.test(u.id)) throw new Error('아이디 정보가 올바르지 않아요.');
-    if (typeof u.nick !== 'string' || !u.nick.trim()) u.nick = u.id;
-    u.nick = u.nick.slice(0, 12);
-    const hex = /^[0-9a-f]+$/;
-    if (!(typeof u.salt === 'string' && hex.test(u.salt) && typeof u.hash === 'string' && hex.test(u.hash))) { u.salt = null; u.hash = null; }
-    if (u.log && !Array.isArray(u.log)) u.log = [];
-    if (u.prefs && u.prefs.ui !== 'kid') u.prefs.ui = 'normal';
-    return u;
+    // A bad/missing password hash is handled as a password-reset restore, but
+    // arbitrary nested data is never trusted by the UI.
+    const hexSalt = typeof u.salt === 'string' && /^[0-9a-f]{32}$/i.test(u.salt);
+    const hexHash = typeof u.hash === 'string' && /^[0-9a-f]{64}$/i.test(u.hash);
+    const normalized = Object.assign({}, u, {
+      id: u.id,
+      nick: typeof u.nick === 'string' && u.nick.trim() ? u.nick.trim().slice(0, 12) : u.id,
+      salt: hexSalt ? u.salt.toLowerCase() : null,
+      hash: hexHash ? u.hash.toLowerCase() : null
+    });
+    return Store.migrate(normalized);
   },
   read(file) {
     if (file.size > this.MAX) { Modal.ask('불러올 수 없어요', '파일이 너무 커요. 한수 백업 파일이 맞는지 확인해 주세요.', '확인', false, true); return; }
@@ -262,10 +372,19 @@ const Backup = {
       try {
         if (pw) { u.salt = Auth.salt(); u.hash = await Auth.hash(pw, u.salt); }
         u.restoredAt = Date.now();
-        Store.data.users[key] = u;
-        delete Store.data.fails[key];
-        Store.setSession(key, true);
-        if (!Store.save() && SafeStore.persistent) throw new Error('브라우저 저장 공간이 가득 찼어요.');
+        const previousData = Store.data;
+        const previousTabSession = SafeStore.sess.get('boardArena.session');
+        const nextData = JSON.parse(JSON.stringify(previousData));
+        nextData.users[key] = u;
+        delete nextData.fails[key];
+        nextData.session = key;
+        Store.data = nextData;
+        SafeStore.sess.del('boardArena.session');
+        if (!Store.save() && SafeStore.persistent) {
+          Store.data = previousData;
+          if (previousTabSession) SafeStore.sess.set('boardArena.session', previousTabSession);
+          throw new Error('브라우저 저장 공간이 가득 찼어요. 기존 기록은 변경하지 않았어요.');
+        }
         close(); App.show();
         Modal.ask('✅ 불러오기 완료', `<b>${esc(u.nick)}</b>님의 기록을 이어서 할 수 있어요.${pw ? '<br>다음 로그인부터는 <b>새 비밀번호</b>를 써 주세요.' : ''}`, '시작하기', false, true);
       } catch (e) { console.error(e); $('rsYes').disabled = false; msg('불러오기에 실패했어요: ' + (e && e.message || e)); }
@@ -548,19 +667,41 @@ function makeWorker(tagId) {
 }
 function engineCall(ctx, msg, fallback, timeMs, minMs) {
   return new Promise(resolve => {
-    const id = ++ctx.reqId, t0 = Date.now();
+    const id = ++ctx.reqId, t0 = Date.now(), worker = ctx.worker;
     let done = false;
+    let cancelTimer = null;
+    const clearCancel = () => { if (ctx.cancel === cancel) ctx.cancel = null; };
+    const cancel = () => {
+      if (done) return;
+      done = true; clearTimeout(cancelTimer); clearCancel();
+      if (id === ctx.reqId) stopProg();
+      resolve(null);
+    };
+    ctx.cancel = cancel;
+    const safeFallback = () => {
+      try { return fallback(); }
+      catch (error) { console.error('AI 대체 탐색 실패:', error); return null; }
+    };
     const finish = r => {
-      if (done) return; done = true;
+      if (done) return; done = true; clearTimeout(cancelTimer); clearCancel();
       const wait = Math.max(0, (minMs || 0) - (Date.now() - t0));
-      setTimeout(() => { stopProg(); resolve(id === ctx.reqId ? r : null); }, wait);
+      setTimeout(() => { if (id === ctx.reqId) stopProg(); resolve(id === ctx.reqId ? r : null); }, wait);
+    };
+    const failWorker = () => {
+      if (done) return;
+      // A previous game's worker must never terminate a worker created by a newer game.
+      if (id !== ctx.reqId) { finish(null); return; }
+      if (ctx.worker === worker) ctx.worker = null;
+      try { if (worker) worker.terminate(); } catch (e) {}
+      setTimeout(() => finish(safeFallback()), 10);
     };
     startProg(Math.max(timeMs > 6000 ? timeMs : 1500, minMs || 0));
-    if (!ctx.worker) { setTimeout(() => finish(fallback()), 40); return; }
-    ctx.worker.onmessage = e => { if (e.data.id === id) finish(e.data.res); };
-    ctx.worker.onerror = e => { e.preventDefault && e.preventDefault(); ctx.worker = null; setTimeout(() => finish(fallback()), 10); };
-    ctx.worker.postMessage(Object.assign({ id }, msg));
-    setTimeout(() => { if (!done && id === ctx.reqId) { try { ctx.worker.terminate(); } catch (e) {} ctx.worker = null; finish(fallback()); } }, timeMs + 10000);
+    if (!worker) { setTimeout(() => { if (done) return; finish(id === ctx.reqId ? safeFallback() : null); }, 40); return; }
+    worker.onmessage = e => { if (e.data && e.data.id === id) finish(e.data.res); };
+    worker.onerror = e => { e.preventDefault && e.preventDefault(); failWorker(); };
+    try { worker.postMessage(Object.assign({ id }, msg)); }
+    catch (error) { console.warn('AI Worker 메시지 전송 실패:', error); failWorker(); return; }
+    cancelTimer = setTimeout(() => { if (!done && id === ctx.reqId) failWorker(); }, Math.max(1000, Number(timeMs) || 3000) + 10000);
   });
 }
 // ---------- 교육 모드: 대국 중 실력에 맞춰 AI 레벨 조절 ----------

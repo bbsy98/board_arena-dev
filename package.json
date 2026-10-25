@@ -1,0 +1,47 @@
+{
+  "name": "hansu-board-arena",
+  "version": "0.7.0",
+  "description": "한수 - 오프라인 가족용 보드게임",
+  "private": true,
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:linux": "electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "kr.hansu.boardarena",
+    "productName": "한수",
+    "asar": true,
+    "directories": { "output": "release" },
+    "files": [
+      "index.html",
+      "css/**/*",
+      "js/**/*",
+      "workers/**/*",
+      "manifest.webmanifest",
+      "desktop/**/*",
+      "package.json",
+      "!tests/**/*",
+      "!*.md",
+      "!service-worker.js"
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "한수"
+    },
+    "mac": { "target": ["dmg"] },
+    "linux": { "target": ["AppImage"] }
+  }
+}

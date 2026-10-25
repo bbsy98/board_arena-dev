@@ -30,6 +30,16 @@
   .arule { font-size:11.5px; color:#7d8597; margin-top:3px; }
   .chk { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--sub); margin-top:10px; }
   .anote { font-size:11.5px; color:#6d7487; text-align:center; margin-top:14px; line-height:1.5; }
+  .local-accounts { margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#1a1e27; }
+  .local-accounts-title { font-size:12px; font-weight:800; color:var(--sub); margin-bottom:8px; }
+  .local-accounts-list { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .local-account-item { display:flex; align-items:center; gap:8px; text-align:left; min-width:0; background:#252a35; border:1px solid var(--line); padding:9px; }
+  .local-account-item .local-account-avatar { flex:0 0 28px; width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:rgba(224,168,74,.18); color:var(--acc); font-weight:800; }
+  .local-account-item .local-account-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+  .local-account-item .local-account-id { display:block; color:var(--sub); font-size:10px; margin-top:2px; }
+  .local-accounts-help { margin-top:8px; font-size:11px; color:var(--sub); line-height:1.5; }
+  .local-account-note { margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:10px; color:var(--sub); font-size:12px; line-height:1.65; background:rgba(26,30,39,.72); }
+  .local-account-note strong { color:var(--txt); }
 
   /* ---------- 홈 ---------- */
   #home { max-width:1220px; margin:0 auto; padding:22px 18px 40px; }

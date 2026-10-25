@@ -2,7 +2,7 @@
 const GoGame = (() => {
   const MAXW = Math.max(1, Math.min(6, (navigator.hardwareConcurrency || 2) - 1));
   const COLS = 'ABCDEFGHJKLMNOPQRST';
-  let G = null, workers = [], workerOK = true, reqId = 0, hover = 0, cv = null, cx = null;
+  let G = null, workers = [], workerOK = true, reqId = 0, cancelSearch = null, hover = 0, cv = null, cx = null;
   let S = 600, M = 34, CELL = 30, woodCanvas = null, raf = 0;
   const cname = c => c === 1 ? '흑' : '백';
 
@@ -16,15 +16,49 @@ const GoGame = (() => {
       const id = ++reqId, t0 = Date.now(), time = lv.time || 30000;
       const opts = { time, maxSims: lv.maxSims, komi: G.komi, history: [...G.hist], cap: board.n <= 9 ? 1200000 : 1600000 };
       const st = board.state(), use = workerOK ? (lv.maxSims ? workers.slice(0, 1) : workers) : [];
+      let done = false, timeout = null;
+      const got = [];
+      const cancel = () => {
+        if (done) return;
+        done = true; clearTimeout(timeout);
+        if (id === reqId) stopProg();
+        if (cancelSearch === cancel) cancelSearch = null;
+        resolve(null);
+      };
+      if (cancelSearch) cancelSearch();
+      cancelSearch = cancel;
       startProg(lv.time || 1500);
-      const deliver = r => { const wait = Math.max(0, (minMs || 0) - (Date.now() - t0)); setTimeout(() => { stopProg(); resolve(id === reqId ? r : null); }, wait); };
-      const fallback = () => combine([search(Board.fromState(st), Object.assign({}, opts, { time: Math.min(time, 4000) }))], board);
-      if (!use.length) { setTimeout(() => deliver(fallback()), 50); return; }
-      const got = []; let done = false;
-      setTimeout(() => { if (done || id !== reqId) return; done = true; workerOK = false; makeWorkers(); deliver(fallback()); }, time + 10000);
+      const deliver = r => {
+        const wait = Math.max(0, (minMs || 0) - (Date.now() - t0));
+        setTimeout(() => {
+          if (id === reqId) stopProg();
+          if (cancelSearch === cancel) cancelSearch = null;
+          resolve(id === reqId ? r : null);
+        }, wait);
+      };
+      const fallback = () => {
+        try { return combine([search(Board.fromState(st), Object.assign({}, opts, { time: Math.min(time, 4000) }))], board); }
+        catch (error) { console.error('바둑 AI 대체 탐색 실패:', error); return null; }
+      };
+      const failToFallback = () => {
+        if (done || id !== reqId) return;
+        done = true; clearTimeout(timeout); workerOK = false; makeWorkers(); deliver(fallback());
+      };
+      if (!use.length) { setTimeout(() => { if (!done && id === reqId) { done = true; deliver(fallback()); } }, 50); return; }
+      timeout = setTimeout(failToFallback, time + 10000);
       use.forEach(w => {
-        w.onmessage = e => { if (e.data.id !== id || done) return; got.push(e.data.res); if (got.length === use.length) { done = true; deliver(combine(got, board)); } };
-        w.postMessage({ id, state: st, opts });
+        w.onmessage = e => {
+          if (!e.data || e.data.id !== id || done) return;
+          if (!e.data.res || !Array.isArray(e.data.res.children)) { failToFallback(); return; }
+          got.push(e.data.res);
+          if (got.length === use.length) {
+            done = true; clearTimeout(timeout);
+            try { deliver(combine(got, board)); } catch (error) { console.error('바둑 AI 결과 병합 실패:', error); workerOK = false; makeWorkers(); deliver(fallback()); }
+          }
+        };
+        w.onerror = e => { if (e.preventDefault) e.preventDefault(); failToFallback(); };
+        try { w.postMessage({ id, state: st, opts }); }
+        catch (error) { console.warn('바둑 AI Worker 메시지 전송 실패:', error); failToFallback(); }
       });
     });
   }
@@ -84,7 +118,7 @@ const GoGame = (() => {
     resize(); update(); loop();
     if (!tut && b.toPlay === G.ai) setTimeout(aiTurn, 300);
   }
-  function destroy() { reqId++; workers.forEach(w => w.terminate()); workers = []; window.removeEventListener('resize', resize); cancelAnimationFrame(raf); G = null; }
+  function destroy() { reqId++; if (cancelSearch) cancelSearch(); cancelSearch = null; workers.forEach(w => w.terminate()); workers = []; window.removeEventListener('resize', resize); cancelAnimationFrame(raf); G = null; }
   function loop() { raf = requestAnimationFrame(() => { if (!G) return; if (G.pulse && performance.now() - G.pulse.t0 < 1400) render(); loop(); }); }
   function name(p) { if (!p) return '패스'; const w = G.b.w, r = ((p / w) | 0) - 1, c = p % w - 1; return COLS[c] + (G.n - r); }
   function isLegalHuman(p) { const b = G.b; if (!b.legal(p)) return false; const t = b.clone(); t.play(p); return !G.hist.has(t.key()); }

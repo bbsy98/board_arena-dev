@@ -1,8 +1,9 @@
-/* 한수 v0.6 안정화 패치 — 캐시 범위 제한 및 오프라인 대응 */
+/* 한수 v0.7.0 오프라인 가족 계정 — 캐시 범위 제한 및 오프라인 대응 */
 'use strict';
 
 const CACHE_PREFIX = 'hansu-board-arena-';
-const CACHE_NAME = 'hansu-board-arena-v0.6.1';
+const CACHE_NAME = 'hansu-board-arena-v0.7.0';
+const LEGACY_CACHE_NAMES = ['hansu-v0.6.0', 'hansu-board-arena-v0.6.3'];
 const APP_SHELL = [
   './',
   './index.html',
@@ -55,7 +56,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(keys
-      .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+      .filter((key) => (key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME) || LEGACY_CACHE_NAMES.includes(key))
       .map((key) => caches.delete(key)));
     await self.clients.claim();
   })());

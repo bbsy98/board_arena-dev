@@ -8,7 +8,12 @@ const ChessGame = (() => {
   let G = null;
   const ctx = { worker: null, reqId: 0 };
   const cname = s => s === WHITE ? '백' : '흑';
-  const josa = (w, a, b) => { const c = w.charCodeAt(w.length - 1); return w + ((c - 0xAC00) % 28 ? a : b); };
+  const josa = (w, a, b) => {
+    // 복구된 기록/비정상 수순 등으로 기물명이 없더라도 안내 문구에서 앱이 중단되지 않게 방어합니다.
+    if (typeof w !== 'string' || !w.length) w = '기물';
+    const c = w.charCodeAt(w.length - 1);
+    return w + ((c - 0xAC00) % 28 ? a : b);
+  };
 
   function xy(sq) { const f = sq & 7, r = sq >> 4, c = G.flip ? 7 - f : f, row = G.flip ? r : 7 - r; return [PAD + c * SQ + SQ / 2, PAD + row * SQ + SQ / 2]; }
   function start(o) {
@@ -38,7 +43,7 @@ const ChessGame = (() => {
     window.addEventListener('resize', resize);
     if (!tut && G.pos.side === G.ai) setTimeout(aiMove, 300);
   }
-  function destroy() { ctx.reqId++; if (ctx.worker) ctx.worker.terminate(); ctx.worker = null; window.removeEventListener('resize', resize); G = null; const pr = $('promo'); if (pr) pr.remove(); }
+  function destroy() { ctx.reqId++; if (ctx.cancel) ctx.cancel(); if (ctx.worker) ctx.worker.terminate(); ctx.worker = null; window.removeEventListener('resize', resize); G = null; const pr = $('promo'); if (pr) pr.remove(); }
   function resize() { const s = boardPx(1); const svg = $('csvg'); if (svg) { svg.style.width = s + 'px'; svg.style.height = s + 'px'; } }
   function snapshot() { return { pos: G.pos.clone(), last: G.last, plies: G.plies, caps: { 0: G.caps[0].slice(), 8: G.caps[8].slice() }, log: $('gLog').innerHTML, prevEval: G.prevEval, bl: G.blunders.length }; }
 

@@ -15,7 +15,12 @@ const JanggiGame = (() => {
   const pname = p => ((p & 7) === P && (p >> 3) === HAN) ? '병' : KNAME[p & 7];
   const sname = s => s === CHO ? '초' : '한';
   const xy = sq => { const v = G.flip ? 89 - sq : sq; return [PADX + (v % 9) * CELL, PADY + ((v / 9) | 0) * CELL]; };
-  const josa = (w, a, b) => { const c = w.charCodeAt(w.length - 1); return w + ((c - 0xAC00) % 28 ? a : b); };
+  const josa = (w, a, b) => {
+    // 복구된 기록/비정상 수순 등으로 기물명이 없더라도 안내 문구에서 앱이 중단되지 않게 방어합니다.
+    if (typeof w !== 'string' || !w.length) w = '기물';
+    const c = w.charCodeAt(w.length - 1);
+    return w + ((c - 0xAC00) % 28 ? a : b);
+  };
 
   function setupBoard(choPat, hanPat) {
     const b = new Int8Array(90), T = { '마': H, '상': E }, mk = J.mkp;
@@ -68,7 +73,7 @@ const JanggiGame = (() => {
     window.addEventListener('resize', resize);
     if (!tut && G.turn === G.ai) setTimeout(aiMove, 300);
   }
-  function destroy() { ctx.reqId++; if (ctx.worker) ctx.worker.terminate(); ctx.worker = null; window.removeEventListener('resize', resize); G = null; }
+  function destroy() { ctx.reqId++; if (ctx.cancel) ctx.cancel(); if (ctx.worker) ctx.worker.terminate(); ctx.worker = null; window.removeEventListener('resize', resize); G = null; }
   function resize() { const s = boardPx(664 / 600); const svg = $('jsvg'); if (svg) { svg.style.width = s + 'px'; svg.style.height = Math.round(s * 664 / 600) + 'px'; } }
   function snapshot() { return { b: G.b.slice(), turn: G.turn, last: G.last, rep: G.rep.length, moves: G.moves, caps: [G.caps[0].slice(), G.caps[1].slice()], log: $('gLog').innerHTML, prevEval: G.prevEval, bl: G.blunders.length }; }
 
