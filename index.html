@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>한수 v0.6 — 한 수 배우는 보드게임</title>
+<link href="./css/style.css" rel="stylesheet"/>
+<meta content="#14161c" name="theme-color"/><meta content="장기, 체스, 바둑, 스도쿠를 배우고 AI와 즐기는 브라우저 보드게임" name="description"/><link href="./manifest.webmanifest" rel="manifest"/></head>
+<body>
+<!-- ============ 로그인 / 회원가입 ============ -->
+<div id="auth">
+<div class="abox">
+<div class="logo"><div class="ic">🀄♟️⚫🔢</div><h1><span>한수</span></h1><p>한 수 배우는 보드게임 · 장기 · 체스 · 바둑 · 스도쿠</p></div>
+<div class="card">
+<div class="atabs"><button class="on" id="tabLogin">로그인</button><button id="tabSignup">회원가입</button></div>
+<form autocomplete="on" id="fLogin">
+<label class="l">아이디</label><input aria-label="아이디" autocomplete="username" id="liId" maxlength="16" type="text"/>
+<label class="l">비밀번호</label><input aria-label="비밀번호" autocomplete="current-password" id="liPw" maxlength="64" type="password"/>
+<label class="chk"><input checked="" id="liKeep" type="checkbox"/> 로그인 상태 유지</label>
+<button class="primary" style="width:100%;margin-top:12px;padding:12px" type="submit">로그인</button>
+</form>
+<form autocomplete="off" class="hidden" id="fSignup">
+<label class="l">아이디</label><input aria-label="새 아이디" autocomplete="username" id="suId" maxlength="16" type="text"/><div class="arule">영문·숫자 4~16자</div>
+<label class="l">비밀번호</label><input aria-label="새 비밀번호" autocomplete="new-password" id="suPw" maxlength="64" type="password"/><div class="arule">6자 이상</div>
+<label class="l">비밀번호 확인</label><input aria-label="새 비밀번호 확인" autocomplete="new-password" id="suPw2" maxlength="64" type="password"/>
+<label class="l">닉네임</label><input aria-label="닉네임" id="suNick" maxlength="12" type="text"/><div class="arule">게임 화면에 보이는 이름이에요 (1~12자)</div>
+<label class="l">화면 스타일</label>
+<div class="uisel"><label><input name="suUi" type="radio" value="kid"/><span>🧸 어린이용<small>10살 이하 추천 · 큰 글씨, 쉬운 말</small></span></label>
+<label><input checked="" name="suUi" type="radio" value="normal"/><span>🎯 일반<small>자세한 기록과 분석</small></span></label></div>
+<button class="primary" style="width:100%;margin-top:14px;padding:12px" type="submit">가입하고 시작하기</button>
+</form>
+<div class="amsg" id="aMsg"></div>
+</div>
+<button class="ghost" id="btnRestoreA" style="width:100%;margin-top:10px">📂 백업 파일로 계정 불러오기</button>
+<div class="local-account-note"><strong>이 기기에만 저장되는 로컬 계정입니다.</strong><br/>휴대폰과 PC가 자동 동기화되지 않아요. 기기를 바꾸기 전에는 반드시 <b>💾 백업</b>을 저장해 주세요.</div>
+</div>
+</div>
+<!-- ============ 홈 ============ -->
+<div class="hidden" id="home">
+<div class="hbar">
+<h1><span>한수</span><small>v0.6</small></h1>
+<div class="who"><div class="av" id="hAv">?</div><div><b id="hNick">-</b><br/><small id="hId">-</small></div><button class="ghost" id="btnBackup">💾 백업</button><button class="ghost" id="btnRestore">📂 불러오기</button><button class="ghost" id="btnUi">🎨 화면</button><button class="ghost" id="btnLogout">로그아웃</button></div>
+</div>
+<div id="bkNotice"></div>
+<div class="card"><div style="font-size:13px;color:var(--sub);margin-bottom:6px">내 기록</div><div aria-label="게임 기록표" class="record-scroll" role="region" tabindex="0"><table class="recTable" id="recTable"></table></div></div>
+<div class="games" id="games"></div>
+<div class="card stylebox"><h3>🧭 나의 기풍 <small>실제로 둔 수를 바탕으로 분석해요</small></h3><div class="sgrid4" id="styleGrid"></div></div>
+<div class="card recent"><h3>최근 기록</h3><ul id="recentList"></ul></div>
+<div class="foot">한수 v0.6 · 모든 AI는 서버 없이 브라우저에서 동작합니다</div>
+</div>
+<!-- ============ 게임 ============ -->
+<div class="hidden" id="game">
+<div class="topbar"><button id="btnHome">← 홈</button><div class="title" id="gTitle">-</div><div class="mode" id="gMode">-</div><div class="vs" id="gVs"></div></div>
+<div class="stage">
+<div id="boardHost"><div id="toast"></div></div>
+<div class="panel">
+<div id="gLesson"></div>
+<div id="gStatus">-</div>
+<div id="gProg"><div></div></div>
+<div id="gCoach"></div>
+<div id="gExtra"></div>
+<div id="gBtns"></div>
+<div id="gInfo"></div>
+<div id="gLog"></div>
+</div>
+</div>
+</div>
+<div class="overlay hidden" id="result"></div>
+<div class="overlay hidden" id="modal"></div>
+<canvas class="hidden" id="confetti"></canvas>
+<input accept=".json,application/json" class="hidden" id="bkFile" type="file"/>
+<script defer="True" src="./js/engines/janggi-engine.js"></script>
+<script defer="True" src="./js/engines/chess-engine.js"></script>
+<script defer="True" src="./js/engines/go-engine.js"></script>
+<script defer="True" src="./js/engines/sudoku-engine.js"></script><script defer="True" src="./js/sudoku-bank.js"></script>
+<script defer="True" src="./js/config.js"></script><script defer="True" src="./js/lessons.js"></script><script defer="True" src="./js/core.js"></script><script defer="True" src="./js/games/janggi.js"></script><script defer="True" src="./js/games/chess.js"></script><script defer="True" src="./js/games/go.js"></script><script defer="True" src="./js/games/sudoku.js"></script><script defer="True" src="./js/bootstrap.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "한수 - 한 수 배우는 보드게임",
+  "short_name": "한수",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14161c",
+  "theme_color": "#14161c",
+  "description": "장기, 체스, 바둑, 스도쿠 학습 및 AI 대전"
+}
