@@ -1,5 +1,5 @@
 // 앱 버전: index.html · service-worker.js · package.json 과 같아야 함 (tests/static-integrity.cjs 검사)
-var APP_VERSION = '0.9.0';
+var APP_VERSION = '1.0.0';
 // ===== 공통 10단계 설정 (화면에는 Lv.N만 표시) =====
 const LEVELS = {
   board: {

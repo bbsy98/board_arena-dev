@@ -1,8 +1,8 @@
-/* 한수 v0.9.0 — 캐시 범위 제한 및 오프라인 대응 (버전을 올리면 새 파일이 확실히 반영됨) */
+/* 한수 v1.0.0 — 캐시 범위 제한 및 오프라인 대응 (버전을 올리면 새 파일이 확실히 반영됨) */
 'use strict';
 
 const CACHE_PREFIX = 'hansu-board-arena-';
-const CACHE_NAME = 'hansu-board-arena-v0.9.0';
+const CACHE_NAME = 'hansu-board-arena-v1.0.0';
 const LEGACY_CACHE_NAMES = ['hansu-v0.6.0', 'hansu-board-arena-v0.6.3', 'hansu-board-arena-v0.7.0', 'hansu-board-arena-v0.7.1', 'hansu-board-arena-v0.8.0'];
 const APP_SHELL = [
   './',
@@ -13,6 +13,7 @@ const APP_SHELL = [
   './js/lessons.js',
   './js/core.js',
   './js/bootstrap.js',
+  './js/v1-enhancements.js',
   './js/sudoku-bank.js',
   './js/engines/janggi-engine.js',
   './js/engines/chess-engine.js',
