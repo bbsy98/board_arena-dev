@@ -31,3 +31,9 @@
 
 - 로컬 계정 선택 UI 및 Electron 데스크톱 앱 빌드 설정 추가
 - Electron 실행 파일은 이 검사 환경에서 실제 빌드·GUI 테스트를 하지 않았으므로 Windows에서 최초 빌드 후 통합 검증 필요
+
+
+## v0.9.0 점검
+- Node 테스트 5종: static-integrity(버전·아이콘·자산), smoke-engines, rules-regression(체스 perft·장기 공격 판정·포/빅장·바둑 패/자충수), lessons-regression(전 레슨 힌트 검증), storage-regression(저장 데이터·이어하기·레이팅·업적·설정 정규화)
+- 브라우저 시나리오(Chromium, 데스크톱 1300×900·모바일 390×844): 3게임 대련 완주→분석→복기, 교육 모드 힌트·경고 카드, 튜토리얼 27개, 설정·이어하기·계정, 종료 지연·기권 즉시, 알림 개수·간격·단계 설정 — 페이지 오류 0건
+- 한계: Electron 설치본·실기기(iOS/Android, 진동) 미검증

@@ -62,6 +62,7 @@ function createWindow() {
     minWidth: 360,
     minHeight: 600,
     title: '한수 - 오프라인 보드게임',
+    icon: path.join(APP_ROOT, 'icons', 'icon-512.png'),
     autoHideMenuBar: true,
     backgroundColor: '#14161c',
     webPreferences: {

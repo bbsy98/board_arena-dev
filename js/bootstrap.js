@@ -12,7 +12,7 @@
     const copy = document.createElement('button');
     copy.textContent = '오류 정보 복사'; copy.style.marginLeft = '10px';
     copy.onclick = async () => {
-      const report = ['한수 v0.7.0 오류', location.href, navigator.userAgent, latestError].join('\n');
+      const report = ['한수 v' + (window.APP_VERSION || '?') + ' 오류', location.href, navigator.userAgent, latestError].join('\n');
       try { await navigator.clipboard.writeText(report); copy.textContent = '복사됨'; }
       catch (_) { prompt('아래 내용을 복사해 주세요.', report); }
     };

@@ -96,7 +96,7 @@ const GoGame = (() => {
     }
     G = { b, n, human, ai: 3 - human, komi, hcp, hist: new Set([b.key()]), moves: [], undo: [], over: false, thinking: false, scoring: false, mode: o.mode,
           dead: new Set(), own: null, showOwn: false, hints: null, o, prevWr: null, blunders: [], best: null, pulse: null,
-          hintCount: 0, warns: 0, heeded: 0, undos: 0, tutHint: null };
+          hintCount: 0, warns: 0, heeded: 0, undos: 0, tutHint: null, rec: [] };
     G.st = stNew({ contact: 0, l3: 0, l4: 0 }); Adapt.init(G, o.level || 1); G.turnT = Date.now();
     cv = document.createElement('canvas'); cv.id = 'gocv'; cx = cv.getContext('2d');
     $('boardHost').insertBefore(cv, $('boardHost').firstChild);
@@ -114,9 +114,32 @@ const GoGame = (() => {
     else Shell.buttons([{ id: 'gPass', label: '패스', on: () => humanMove(0) }, { id: 'gRes', label: '기권', cls: 'danger', on: resign }, { id: 'gCoord', label: '좌표', on: () => { G.noCoord = !G.noCoord; resize(); } }]);
     if (!tut) Shell.log(`대국 시작 — ${n}줄 · 나는 ${cname(human)} · 덤 ${komi}${hcp ? ` · ${hcp}점 접바둑` : ''}`, 'sys');
     if (o.mode === 'train') Shell.coach('바로 잡힐 자리에 두려고 하면 알려줄게요. <b>💡 힌트</b>는 좋은 자리 3곳을, <b>형세 판단</b>은 집 계산을 보여줘요.');
+    if (o.resume) restore(o.resume);
     window.addEventListener('resize', resize);
     resize(); update(); loop();
-    if (!tut && b.toPlay === G.ai) setTimeout(aiTurn, 300);
+    if (!tut && G.b.passes >= 2) setTimeout(() => { if (G && !G.over && !G.scoring) startScoring(); }, 200);
+    else if (!tut && G.b.toPlay === G.ai) setTimeout(aiTurn, 300);
+  }
+  // ---------- 저장 · 이어하기 ----------
+  function restore(r) {
+    if (!Array.isArray(r.moves)) throw new Error('저장 데이터 형식 오류');
+    r.moves.forEach(p => {
+      const b = G.b;
+      if (!Number.isInteger(p) || (p !== 0 && (p < 0 || p >= b.sz || !b.legal(p)))) throw new Error('저장된 수순이 올바르지 않아요');
+      if (p) { const t = b.clone(); t.play(p); if (G.hist.has(t.key())) throw new Error('저장된 수순이 올바르지 않아요'); }
+      const c = b.toPlay, before = b.cap[c];
+      G.rec.push({ st: b.state(), p, c, h: c === G.human, txt: name(p) });
+      b.play(p); G.hist.add(b.key()); G.moves.push({ c, p });
+      const got = b.cap[c] - before;
+      Shell.log(`${G.moves.length}. ${c === 1 ? '●' : '○'} ${name(p)}${got ? ` (${got}점 따냄)` : ''}`, c === G.human ? 'me' : 'ai');
+    });
+    Resume.restoreCommon(G, r);
+    if (typeof r.prevWr === 'number') { G.prevWr = r.prevWr; setWR(r.prevWr); }
+    Shell.log('— 저장된 대국을 이어서 둡니다 —', 'sys');
+  }
+  function resumeData() {
+    if (!G || G.mode === 'tutorial' || G.over) return null;
+    return Object.assign({ o: { mode: G.o.mode, level: G.o.level, size: G.n, human: G.human, hcp: G.hcp, komi: G.o.komi }, moves: G.rec.map(r => r.p), prevWr: G.prevWr }, Resume.commonData(G));
   }
   function destroy() { reqId++; if (cancelSearch) cancelSearch(); cancelSearch = null; workers.forEach(w => w.terminate()); workers = []; window.removeEventListener('resize', resize); cancelAnimationFrame(raf); G = null; }
   function loop() { raf = requestAnimationFrame(() => { if (!G) return; if (G.pulse && performance.now() - G.pulse.t0 < 1400) render(); loop(); }); }
@@ -129,19 +152,27 @@ const GoGame = (() => {
       if (b.n8.some(d => b.col[p + d] === 3 - c)) st.contact++;
       if (st.moves <= 15 && b.n >= 13) { if (b.line[p] === 2) st.l3++; else if (b.line[p] === 3) st.l4++; }
     }
+    if (G.mode !== 'tutorial') G.rec.push({ st: b.state(), p, c, h: !!byHuman, txt: name(p) });
     b.play(p); G.hist.add(b.key()); G.moves.push({ c, p }); G.hints = null; G.showOwn = false;
     const got = b.cap[c] - before;
     if (G.mode !== 'tutorial') Shell.log(`${G.moves.length}. ${c === 1 ? '●' : '○'} ${name(p)}${got ? ` (${got}점 따냄)` : ''}`, byHuman ? 'me' : 'ai');
     if (got && byHuman && G.st) G.st.caps += got;
-    if (got && G.mode !== 'tutorial') { if (byHuman) Shell.toast(`${got}점 따냄!`, '상대 돌을 잡았어요', 'good'); else Shell.toast(`내 돌 ${got}점이 잡혔다!`, name(p), 'bad'); }
+    Shell.sfx(got ? (byHuman ? 'capture' : 'lose') : p ? 'stone' : 'pass');
+    if (got && G.mode !== 'tutorial') {
+      const kid = isKid(), chip = Chip.go(3 - c, got);
+      if (byHuman) Shell.notify({ kind: 'good', chip, prio: 'major', title: kid ? `우와! 돌 ${got}개를 땄어!` : `${c === 1 ? '백' : '흑'} 돌 ${got}개를 따냈어요`, sub: kid ? `+${got}점 ⭐` : `${name(p)}에 두어 활로를 모두 막았어요 · <b>+${got}</b>` });
+      else Shell.notify({ kind: 'bad', chip, prio: 'major', title: kid ? `앗, 내 돌 ${got}개가 잡혔어` : `내 돌 ${got}개를 잃었어요`, sub: kid ? '숨구멍(활로)을 많이 만들어 보자!' : `AI가 ${name(p)}에 두어 활로를 막았어요 · <b>−${got}</b>` });
+    }
+    G.aiTxt = byHuman ? '' : (p ? `🤖 AI: ${name(p)}에 두었어요 (빨간 동그라미)` : '🤖 AI: 패스');
     if (p) G.pulse = { p, t0: performance.now() };
-    else if (!byHuman) Shell.toast('AI가 패스했어요', '나도 패스하면 계가합니다', 'warn');
+    else if (!byHuman) Shell.notify({ kind: 'warn', prio: 'feedback', title: 'AI가 패스했어요', sub: '더 둘 곳이 없으면 나도 <b>패스</b> → 집 계산(계가)을 해요' });
     if (G.mode === 'train') Shell.coach('');
-    if (b.passes >= 2) { startScoring(); return; }
+    if (b.passes >= 2) { Shell.autosave(); startScoring(); return; }
+    if (G.mode !== 'tutorial') Shell.autosave();
   }
   function tutMove(p) {
     const L = LESSONS.go[G.o.lesson], g = L.goal, snap = G.b.clone();
-    G.b.play(p); G.pulse = { p, t0: performance.now() }; G.tutHint = null; render();
+    G.b.play(p); G.pulse = { p, t0: performance.now() }; G.tutHint = null; render(); Sound.play('stone');
     const pass = g.type === 'capture' ? G.b.cap[1] >= g.n : g.pts.some(([r, c]) => G.b.pt(r, c) === p);
     if (pass) {
       G.over = true; update();
@@ -163,7 +194,9 @@ const GoGame = (() => {
       if (t.cap[G.human] === before && t.inAtari(h)) {
         G.warns++; G.busy = true;
         const sz = t.size[h];
-        const go = await Modal.ask('⚠️ 잠깐!', `여기에 두면 ${sz > 1 ? `돌 <b>${sz}개 덩어리</b>가` : '이 돌이'} <b>단수</b>(활로 1개)가 돼서 AI가 바로 잡을 수 있어요.`, '그래도 두기', false, false, '다시 생각하기');
+        G.hints = [{ m: p, wr: null }]; render();
+        const go = await Shell.coachAsk('⚠️ 잠깐!', `★ 자리에 두면 ${sz > 1 ? `돌 <b>${sz}개 덩어리</b>가` : '이 돌이'} <b>단수</b>(숨구멍 1개)가 돼서 AI가 바로 잡을 수 있어요.`);
+        if (G) { G.hints = null; render(); }
         if (G) G.busy = false;
         if (!G || !go) { if (G) { G.heeded++; Shell.coach('좋아요! 활로가 넉넉한 자리를 찾아봐요.'); } return; }
         G.ignoredWarn = true;
@@ -178,7 +211,7 @@ const GoGame = (() => {
     if (!G || G.over || G.scoring || G.b.toPlay !== G.ai) return;
     G.thinking = true; update();
     const myG = G, lvN = G.mode === 'train' ? G.lvNow : G.o.level, lv = LEVELS.go[lvN];
-    const r = await runSearch(G.b, lv, 700);
+    const r = await runSearch(G.b, lv, Shell.aiDelay(700));
     if (!r || myG !== G || !G.thinking) return;
     G.thinking = false; G.own = r.own;
     if (!r.ch.length) { applyMove(0, false); render(); update(); return; }
@@ -211,11 +244,11 @@ const GoGame = (() => {
   function setWR(h) { const e = $('gWr'); if (e) e.style.width = Math.max(0, Math.min(100, h * 100)) + '%'; const l = $('gWrL'); if (l) l.textContent = `내 승률 ${(h * 100).toFixed(0)}%`; }
   function undo() {
     if (!G || !G.undo.length || G.over) return;
-    reqId++; if (G.thinking) makeWorkers(); stopProg(); G.undos++;
+    reqId++; if (G.thinking) makeWorkers(); stopProg(); G.undos++; Notify.clear(); G.aiTxt = '';
     const s = G.undo.pop();
-    G.b = s.b; G.hist = s.hist; G.moves.length = s.movesLen; $('gLog').innerHTML = s.log; G.prevWr = s.prevWr; G.blunders.length = s.bl;
+    G.b = s.b; G.hist = s.hist; G.moves.length = s.movesLen; G.rec.length = s.movesLen; $('gLog').innerHTML = s.log; G.prevWr = s.prevWr; G.blunders.length = s.bl;
     G.thinking = false; G.scoring = false; G.dead = new Set(); G.hints = null; G.showOwn = false; $('gScore').style.display = 'none';
-    render(); update();
+    render(); update(); Shell.autosave();
   }
   async function hint() {
     if (!G || G.over || G.scoring || G.thinking || G.b.toPlay !== G.human) return;
@@ -310,7 +343,7 @@ const GoGame = (() => {
     else if (G.thinking && b.toPlay === G.ai) Shell.status(`🤖 AI(${cname(G.ai)})가 생각 중<span class="dots"></span>`, 'think');
     else if (G.thinking) Shell.status(`분석 중<span class="dots"></span>`, 'think');
     else if (b.last === 0 && b.moveNum > 0) Shell.status('⚠️ AI가 패스했어요 — 패스하면 계가', 'alert');
-    else Shell.status(`👉 내 차례 (${cname(G.human)})`, 'me');
+    else Shell.status(`👉 내 차례 (${cname(G.human)})${G.aiTxt ? `<small class="stsub">${G.aiTxt}</small>` : ''}`, 'me');
     const busy = G.thinking || G.over || G.scoring;
     $('gPass').disabled = busy || b.toPlay !== G.human; $('gRes').disabled = G.over || G.scoring;
     if ($('gHint')) $('gHint').disabled = busy || b.toPlay !== G.human;
@@ -364,7 +397,8 @@ const GoGame = (() => {
       cx.fillStyle = '#4a3418'; cx.font = `bold ${Math.max(10, M * .42)}px sans-serif`; cx.textAlign = 'center'; cx.textBaseline = 'middle';
       for (let i = 0; i < n; i++) { cx.fillText(COLS[i], M + i * CELL, M * .45); cx.fillText(COLS[i], M + i * CELL, S - M * .45); cx.fillText(n - i, M * .45, M + i * CELL); cx.fillText(n - i, S - M * .45, M + i * CELL); }
     }
-    const terr = G.scoring || (G.over && G.scoreInfo) ? areaScore(b, G.dead, G.komi).terr : null;
+    const atFinal = G.reviewK === undefined || G.reviewK === null;
+    const terr = atFinal && (G.scoring || (G.over && G.scoreInfo)) ? areaScore(b, G.dead, G.komi).terr : null;
     for (const p of b.pts) {
       const [x, y] = xy(p);
       if (terr) { const t = terr[p]; if (t && (b.col[p] === 0 || G.dead.has(p))) { cx.fillStyle = t === 1 ? '#111' : '#f5f5f5'; const s = CELL * .32; cx.fillRect(x - s / 2, y - s / 2, s, s); } }
@@ -375,7 +409,7 @@ const GoGame = (() => {
     }
     for (const p of b.pts) {
       const c = b.col[p]; if (c !== 1 && c !== 2) continue;
-      const [x, y] = xy(p), dead = (G.scoring || G.over) && G.dead.has(p);
+      const [x, y] = xy(p), dead = atFinal && (G.scoring || G.over) && G.dead.has(p);
       stone(x, y, c, dead ? .45 : null);
       if (dead || (G.showOwn && G.own && ((c === 1 && G.own[p] < -.3) || (c === 2 && G.own[p] > .3)))) {
         cx.strokeStyle = dead ? (c === 1 ? '#fff' : '#000') : '#d22'; cx.lineWidth = 2; const s = CELL * .2;
@@ -394,6 +428,7 @@ const GoGame = (() => {
       const [x, y] = xy(h.m);
       cx.fillStyle = ['rgba(40,160,70,.85)', 'rgba(40,120,200,.8)', 'rgba(200,140,30,.8)'][i]; cx.beginPath(); cx.arc(x, y, CELL * .42, 0, Math.PI * 2); cx.fill();
       cx.fillStyle = '#fff'; cx.font = `bold ${CELL * .32}px sans-serif`; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+      if (h.wr === null || h.wr === undefined) { cx.fillText('★', x, y); return; }
       cx.fillText('ABC'[i], x, y - CELL * .1); cx.font = `${CELL * .22}px sans-serif`; cx.fillText((h.wr * 100).toFixed(0) + '%', x, y + CELL * .18);
     });
     if (hover && !G.over && !G.scoring && !G.thinking && b.toPlay === G.human && b.col[hover] === 0) { const [x, y] = xy(hover); stone(x, y, G.human, .45); }
@@ -404,5 +439,46 @@ const GoGame = (() => {
     if (c < 0 || rr < 0 || c >= G.n || rr >= G.n) return 0;
     return G.b.pt(rr, c);
   }
-  return { start, destroy, moveCount: () => G ? G.moves.length : 0, _g: () => G };
+
+  // ---------- 복기 · 대국 후 분석 ----------
+  const review = {
+    len: () => G ? G.rec.length : 0,
+    moves: () => G ? G.rec.map((r, i) => ({ txt: r.txt, h: r.h, side: r.c === 1 ? 0 : 1, no: i + 1, lab: String(i + 1) })) : [],
+    show(k, best) {
+      if (!G) return;
+      if (!G.finalB) G.finalB = G.b;
+      G.reviewK = k >= G.rec.length ? null : k;
+      G.b = k >= G.rec.length ? G.finalB : Board.fromState(G.rec[k].st);
+      G.hints = best ? [{ m: best, wr: null }] : null;
+      G.pulse = null; G.showOwn = false;
+      render();
+    },
+    jobs() {
+      if (G.n > 13) return { src: 'srcGo', list: [], parallel: 1, skip: '19줄 바둑은 분석 시간이 너무 길어 복기만 제공해요.' };
+      const need = new Set();
+      G.rec.forEach((r, i) => { if (r.h) { need.add(i); need.add(i + 1); } });
+      const states = k => k < G.rec.length ? G.rec[k].st : (G.finalB || G.b).state();
+      const opts = { maxSims: G.n <= 9 ? 900 : 700, time: 9000, komi: G.komi, cap: 500000 };
+      const list = [...need].sort((a, b) => a - b).map(k => ({ idx: k, msg: { state: states(k), opts }, local: () => search(Board.fromState(states(k)), Object.assign({}, opts, { maxSims: 300 })) }));
+      return { src: 'srcGo', list, parallel: Math.max(1, Math.min(4, MAXW)) };
+    },
+    judge(jobs, results) {
+      const wr = {}, top = {};
+      jobs.list.forEach((j, n) => {
+        const r = results[n]; if (!r || !Array.isArray(r.children)) return;
+        const ch = r.children.filter(c => c.n > 0).sort((a, b) => b.n - a.n);
+        if (!ch.length) return;
+        wr[j.idx] = ch[0].w / ch[0].n; top[j.idx] = ch[0].m;
+      });
+      const res = {};
+      G.rec.forEach((r, i) => {
+        if (!r.h || wr[i] === undefined || wr[i + 1] === undefined) return;
+        const loss = Math.max(0, wr[i] - (1 - wr[i + 1]));
+        const best = top[i] && top[i] !== r.p ? top[i] : 0;
+        res[i] = { decided: wr[i] < 0.06 || wr[i] > 0.94, loss, cls: Adapt.classify(loss, LEVELS.adapt.go), best, bestTxt: best ? name(best) : '', unit: 'wr' };
+      });
+      return res;
+    }
+  };
+  return { start, destroy, review, resumeData, moveCount: () => G ? G.moves.length : 0, _g: () => G };
 })();

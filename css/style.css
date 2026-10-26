@@ -1,5 +1,4 @@
-
-  :root { --bg1:#14161c; --card:#252a35; --line:#353b49; --txt:#e9ebf0; --sub:#9aa3b5; --acc:#e0a84a; --win:#2fbf71; --loss:#e5484d; --draw:#8b93a7; --blue:#4f8cff; }
+:root { --bg1:#14161c; --card:#252a35; --line:#353b49; --txt:#e9ebf0; --sub:#9aa3b5; --acc:#e0a84a; --win:#2fbf71; --loss:#e5484d; --draw:#8b93a7; --blue:#4f8cff; }
   * { box-sizing:border-box; }
   html, body { margin:0; min-height:100%; }
   body { font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo",sans-serif; background:radial-gradient(1200px 600px at 20% -10%, #2a2f3d 0%, var(--bg1) 60%); color:var(--txt); }
@@ -294,3 +293,119 @@
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:.01ms !important; }
 }
+
+/* ===== v0.8 대국 후 분석 · 복기 ===== */
+.ranal { text-align:left; margin-top:10px; background:#1a1e27; border:1px solid var(--line); border-radius:12px; padding:11px 14px; font-size:13.5px; line-height:1.6; }
+.ranal:empty { display:none; }
+.ranal .anh { font-weight:800; color:var(--acc); }
+.ranal .anh2 { font-weight:800; margin-top:8px; font-size:13px; }
+.ranal ul { margin:4px 0 0; padding-left:18px; }
+.ranal .anbar { height:6px; border-radius:3px; background:#2c3242; overflow:hidden; margin-top:6px; }
+.ranal .anbar i { display:block; height:100%; background:var(--acc); transition:width .3s; }
+.ranal .anq { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.ranal .q { padding:2px 9px; border-radius:20px; font-size:12px; font-weight:700; background:#252a35; border:1px solid var(--line); }
+.ranal .q.good { color:var(--win); } .ranal .q.slip { color:#f59e0b; } .ranal .q.blunder { color:var(--loss); } .ranal .q.acc { color:var(--txt); }
+.ranal .anfoot { margin-top:6px; color:var(--sub); }
+.anjump { padding:1px 6px; font-size:12.5px; background:transparent; color:var(--txt); border:1px solid var(--line); border-radius:6px; }
+.rvbox { padding:10px 12px; }
+.rvnote { font-size:12px; color:var(--sub); margin-bottom:6px; }
+.rvlist { display:flex; flex-wrap:wrap; gap:4px; max-height:240px; overflow:auto; }
+.rvm { padding:4px 7px; font-size:12px; background:#1a1e27; border:1px solid var(--line); color:var(--sub); font-family:Consolas,"D2Coding",monospace; }
+.rvm.me { color:#ffd58a; } .rvm.ai { color:#9ec5ff; }
+.rvm .rvn { opacity:.55; margin-right:4px; }
+.rvm i { font-style:normal; }
+.rvm.c-blunder { border-color:var(--loss); background:rgba(229,72,77,.14); }
+.rvm.c-slip { border-color:#f59e0b; background:rgba(245,158,11,.12); }
+.rvm.cur { outline:2px solid var(--acc); outline-offset:0; color:#fff; }
+body.kid .ranal { background:#fffaf2; border:2px solid var(--line); font-size:15px; }
+body.kid .ranal .q { background:#fff; }
+body.kid .rvm { background:#fff; box-shadow:none; color:#7a3d00; padding:6px 8px; font-size:13px; }
+body.kid .rvm.ai { color:#1f6fd1; }
+body.kid .anjump { background:#fff; color:#2b2d42; box-shadow:none; padding:2px 8px; }
+/* ===== v0.8 이어하기 ===== */
+.pane-r { margin-top:10px; }
+.resbtn { width:100%; padding:10px 12px; text-align:left; font-weight:800; }
+.resbtn small { display:block; font-weight:500; opacity:.85; font-size:11.5px; margin-top:2px; }
+.hflash { position:fixed; left:50%; bottom:24px; transform:translate(-50%,40px); opacity:0; z-index:95; padding:11px 16px; border-radius:12px; background:#263247; color:#fff; font-size:13.5px; box-shadow:0 10px 30px rgba(0,0,0,.45); transition:all .25s; pointer-events:none; max-width:92vw; text-align:center; }
+.hflash.on { opacity:1; transform:translate(-50%,0); }
+body.kid .hflash { background:#fff; color:#2b2d42; border:2px solid #ffc58a; }
+/* ===== v0.8 설정 ===== */
+.setbox { width:min(440px,94vw); text-align:left; max-height:92vh; overflow:auto; }
+.setbox .mt { text-align:center; }
+.setsec { border-top:1px solid var(--line); padding:10px 0; }
+.sett { font-size:13px; font-weight:800; margin-bottom:6px; }
+.sethelp { font-size:11.5px; color:var(--sub); margin-top:5px; line-height:1.5; }
+.setrow { display:flex; gap:6px; } .setrow input { flex:1; }
+body.kid .setsec { border-color:#ffe3c2; }
+/* ===== v0.8 학습 리포트 · 업적 · 레이팅 ===== */
+.report { margin-top:16px; } .report h3 { margin:0 0 10px; font-size:16px; } .report h3 small { font-size:12px; color:var(--sub); font-weight:500; margin-left:6px; }
+.rpgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+.rpgrid > div { background:#1a1e27; border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+.rpgrid b { display:block; font-size:22px; color:var(--acc); }
+.rpgrid span { font-size:12px; color:var(--sub); }
+.rpnote { margin-top:8px; font-size:12.5px; color:var(--sub); }
+.rpsub { margin-top:10px; font-size:12px; font-weight:800; color:var(--sub); }
+.achgrid { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-top:6px; }
+.ach { text-align:center; padding:8px 4px; border-radius:10px; background:#1a1e27; border:1px solid var(--line); opacity:.5; }
+.ach.on { opacity:1; border-color:rgba(224,168,74,.6); background:rgba(224,168,74,.1); }
+.ach .ai { font-size:22px; } .ach .an { font-size:11px; margin-top:2px; }
+.achnew { margin-top:8px; padding:8px 12px; border-radius:10px; font-size:13.5px; background:rgba(224,168,74,.14); border:1px solid rgba(224,168,74,.45); text-align:left; animation:rin .45s ease; }
+.achnew span { color:var(--sub); font-size:12px; margin-left:4px; }
+.rrating { margin-top:6px; font-size:14px; }
+@media (max-width:900px) { .rpgrid { grid-template-columns:repeat(2,1fr); } .achgrid { grid-template-columns:repeat(4,1fr); } }
+@media (max-width:420px) { .achgrid { grid-template-columns:repeat(3,1fr); } }
+body.kid .rpgrid > div, body.kid .ach { background:#fffaf2; border:2px solid var(--line); }
+body.kid .ach.on { background:#fff1dc; border-color:#ffb066; }
+body.kid .achnew { background:#fff1dc; border:2px solid #ffc58a; }
+/* ===== v0.8 모바일 보정 ===== */
+.topbar .title, .topbar .mode, #btnHome { white-space:nowrap; flex-shrink:0; }
+@media (max-width:700px) {
+  #gBtns.rv { grid-template-columns:repeat(3,1fr); }
+  #gBtns.rv button { min-height:38px; padding:6px 4px; font-size:12px; }
+  body.reviewing .stage { padding-bottom:130px; }
+  .rvlist { max-height:150px; }
+  .ranal { font-size:13px; padding:10px 11px; }
+}
+/* ===== v0.9 알림 말풍선: 판을 가리지 않는 상단 알림 ===== */
+#toast { display:none !important; }
+.sr-only { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+#notify { position:fixed; top:6px; left:50%; transform:translateX(-50%); z-index:70; width:min(460px,calc(100vw - 16px)); pointer-events:none; }
+.ncard { display:flex; align-items:center; gap:11px; padding:9px 14px 9px 10px; border-radius:14px; background:rgba(28,32,42,.96); color:#fff; border:1px solid var(--line); border-left:5px solid #7d8597; box-shadow:0 10px 28px rgba(0,0,0,.45); backdrop-filter:blur(8px); animation:nin .28s cubic-bezier(.2,1.2,.4,1); }
+.ncard.out { animation:nout .2s ease forwards; }
+@keyframes nin { from { transform:translateY(-120%); opacity:0; } to { transform:none; opacity:1; } }
+@keyframes nout { to { transform:translateY(-120%); opacity:0; } }
+.ncard.good { border-left-color:var(--win); } .ncard.bad { border-left-color:var(--loss); } .ncard.warn { border-left-color:#f59e0b; } .ncard.info { border-left-color:var(--blue); }
+.ncard .ntxt { min-width:0; flex:1; }
+.ncard .nt { font-weight:800; font-size:15px; line-height:1.3; }
+.ncard .ns { font-size:12.5px; color:#c6ccd8; margin-top:1px; line-height:1.4; }
+.ncard.good .ns b { color:#5fe39b; } .ncard.bad .ns b { color:#ff8f93; }
+.nbadge { display:inline-block; margin-left:4px; padding:1px 7px; border-radius:20px; font-size:11.5px; font-weight:900; background:#e5484d; color:#fff; vertical-align:2px; }
+.ncard.warn .nbadge, .ncard.good .nbadge { background:#f59e0b; color:#1a1306; }
+.nchips { display:flex; align-items:center; gap:3px; flex:0 0 auto; }
+.narrow { color:#7d8597; font-size:12px; margin:0 1px; }
+.nchip { display:inline-grid; place-items:center; width:30px; height:30px; font-weight:900; font-size:16px; line-height:1; }
+.nchip.jg { background:#f6e7c4; clip-path:polygon(29% 0,71% 0,100% 29%,100% 71%,71% 100%,29% 100%,0 71%,0 29%); font-family:'Batang','Noto Serif KR',serif; }
+.nchip.jg.s0 { color:#1257a8; box-shadow:inset 0 0 0 2px #1257a8; } .nchip.jg.s1 { color:#c0262d; box-shadow:inset 0 0 0 2px #c0262d; }
+.nchip.ch { font-size:25px; border-radius:8px; background:#f0d9b5; font-family:'Segoe UI Symbol','DejaVu Sans','Noto Sans Symbols2',serif; }
+.nchip.ch.w { color:#fff; text-shadow:0 0 2px #000,0 0 1px #000; } .nchip.ch.b { color:#111; }
+.nchip.go { width:20px; height:20px; border-radius:50%; } .nchip.go.c1 { background:radial-gradient(circle at 35% 30%,#666,#050505); } .nchip.go.c2 { background:radial-gradient(circle at 35% 30%,#fff,#bdbbb4); }
+.nmore { font-size:12px; color:#c6ccd8; font-weight:800; }
+body.kid .ncard { background:#fff; color:#2b2d42; border:2px solid #ffd9a8; border-left-width:6px; font-size:16px; }
+body.kid .ncard .nt { font-size:17px; } body.kid .ncard .ns { color:#5b5146; font-size:14px; }
+body.kid .ncard.good { border-left-color:#21a45c; } body.kid .ncard.bad { border-left-color:#ef4444; } body.kid .ncard.warn { border-left-color:#ff8a1f; }
+body.kid .nchip { width:36px; height:36px; font-size:19px; }
+@media (max-width:700px) { #notify { top:4px; } .ncard { padding:8px 11px 8px 8px; } .ncard .nt { font-size:14px; } .nchip { width:26px; height:26px; font-size:14px; } .nchip.ch { font-size:22px; } }
+@media (prefers-reduced-motion:reduce) { .ncard, .ncard.out { animation:none; } }
+/* ===== v0.9 코치 경고 카드 (판을 가리지 않음) ===== */
+.coach.cwarn { background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.6); animation:cwin .3s ease; }
+.coach.cwarn .ct { color:#f5b544; }
+@keyframes cwin { 0% { transform:translateX(8px); opacity:0; } 100% { transform:none; opacity:1; } }
+.cwbtns { display:grid; grid-template-columns:1.3fr 1fr; gap:6px; margin-top:9px; }
+.cwbtns button { padding:10px 8px; font-size:14px; }
+.cwhelp { font-size:11.5px; color:var(--sub); margin-top:6px; }
+body.kid .coach.cwarn { background:#fff4e0; border:2px solid #ffb066; color:#5b3a00; }
+body.kid .coach.cwarn .ct { color:#d86a00; }
+/* ===== v0.9 상태줄 보조 문구 (AI가 방금 둔 수) ===== */
+#gStatus { flex-wrap:wrap; }
+#gStatus .stsub { flex-basis:100%; display:block; font-size:12.5px; font-weight:600; color:var(--sub); margin-top:1px; }
+body.kid #gStatus .stsub { font-size:14px; color:#7a6f63; }

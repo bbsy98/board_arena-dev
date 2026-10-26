@@ -1,4 +1,3 @@
-
 // ======================= 체스 엔진 (0x88, PVS + TT + Null move + LMR) + 10단계 강도 조절 =======================
 var ChessEngine = (function () {
   'use strict';
@@ -513,4 +512,3 @@ if (typeof window === 'undefined' && typeof self !== 'undefined' && typeof impor
   };
 }
 if (typeof module !== 'undefined') module.exports = ChessEngine;
-

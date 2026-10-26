@@ -1,4 +1,3 @@
-
 'use strict';
 // ======================= 바둑 엔진 (MCTS + RAVE + 휴리스틱 플레이아웃) =======================
 var EMPTY = 0, BLACK = 1, WHITE = 2, EDGE = 3, PASS = 0;
@@ -446,4 +445,3 @@ if (typeof window === 'undefined' && typeof self !== 'undefined' && typeof impor
   };
 }
 if (typeof module !== 'undefined') module.exports = { Board: Board, search: search, playout: playout, PAT: PAT, EMPTY: EMPTY, BLACK: BLACK, WHITE: WHITE, EDGE: EDGE, PASS: PASS };
-

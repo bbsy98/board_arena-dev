@@ -9,12 +9,21 @@ const SudokuGame = (() => {
       const L = LESSONS.sudoku[o.lesson];
       if (L.gen) pz = SE.generate(L.gen);
       else { const sol = L.sol.split('').map(Number), p = sol.slice(); L.blanks.forEach(k => p[k] = 0); pz = { n: L.n, puzzle: p, solution: sol, tech: 1 }; }
-    } else pz = SE.generate(o.level, typeof SUDOKU_BANK !== 'undefined' ? SUDOKU_BANK : null);
+    } else if (o.resume) pz = Resume.sudokuPuzzle(o.resume);
+    else pz = SE.generate(o.level, typeof SUDOKU_BANK !== 'undefined' ? SUDOKU_BANK : null);
     const n = pz.n, geo = SE.geo(n), match = o.mode === 'match';
     G = { o, n, geo, mode: o.mode, given: pz.puzzle.map(v => !!v), val: pz.puzzle.slice(), sol: pz.solution, memo: new Array(n * n).fill(0),
           sel: -1, memoMode: false, check: !match, mistakes: 0, hints: 0, hintTechs: [], hintState: null,
           undo: [], t0: Date.now(), over: false, tech: pz.tech, popCell: -1, targets: o.mode === 'tutorial' ? pz.puzzle.map((v, i) => v ? -1 : i).filter(i => i >= 0) : [] };
     G.st = { inputs: 0, memo: 0, mistakes: 0, sec: 0, hints: 0 };
+    if (o.resume) {
+      const r = o.resume, ok = a => Array.isArray(a) && a.length === n * n && a.every(v => Number.isInteger(v) && v >= 0);
+      if (!ok(r.val) || !ok(r.memo)) throw new Error('저장 데이터 형식 오류');
+      G.val = r.val.map((v, i) => G.given[i] ? pz.puzzle[i] : Math.min(n, v)); G.memo = r.memo.slice();
+      G.mistakes = Store.count(r.mistakes, 10000); G.hints = Store.count(r.hints, 10000); G.t0 = Date.now() - Store.count(r.sec, 864000) * 1000;
+      G.hintTechs = Array.isArray(r.hintTechs) ? r.hintTechs.filter(t => typeof t === 'string').slice(0, 10) : [];
+      if (r.st && typeof r.st === 'object') Object.keys(G.st).forEach(k => { G.st[k] = Store.count(r.st[k]); });
+    }
     const host = $('boardHost');
     const grid = document.createElement('div'); grid.className = 'sgrid'; grid.id = 'sgrid';
     host.insertBefore(grid, host.firstChild);
@@ -67,19 +76,21 @@ const SudokuGame = (() => {
       G.val[i] = d; G.memo[i] = 0; G.popCell = i;
       G.undo[G.undo.length - 1].memoAll = G.geo.peers[i].map(p => [p, G.memo[p]]);
       G.geo.peers[i].forEach(p => G.memo[p] &= ~(1 << d));
-      if (d !== G.sol[i]) { G.mistakes++; if (G.check) Shell.toast('앗, 다른 숫자예요', '같은 줄·상자를 다시 확인해 보세요', 'warn'); }
+      if (d !== G.sol[i]) { G.mistakes++; if (G.check) { Shell.toast('앗, 다른 숫자예요', '같은 줄·상자를 다시 확인해 보세요', 'warn'); Sound.play('err'); } else Sound.play('tick'); }
+      else Sound.play('tick');
     }
     G.hintState = null;
     render(); update();
-    if (G.val.every((v, k) => v === G.sol[k])) finish(true);
-    else if (G.mode === 'match' && G.val.every(v => v)) Shell.toast('틀린 칸이 있어요', '다 채웠지만 맞지 않는 숫자가 있어요', 'warn');
+    if (G.val.every((v, k) => v === G.sol[k])) { finish(true); return; }
+    Shell.autosave();
+    if (G.mode === 'match' && G.val.every(v => v)) Shell.toast('틀린 칸이 있어요', '다 채웠지만 맞지 않는 숫자가 있어요', 'warn');
   }
   function undo() {
     if (!G || G.over || !G.undo.length) return;
     const u = G.undo.pop();
     G.val[u.i] = u.v; G.memo[u.i] = u.m;
     if (u.memoAll) u.memoAll.forEach(([p, m]) => G.memo[p] = m);
-    G.sel = u.i; render(); update();
+    G.sel = u.i; render(); update(); Shell.autosave();
   }
   // 3단계 힌트
   function hint() {
@@ -170,7 +181,12 @@ const SudokuGame = (() => {
     }
     grid.innerHTML = h; G.popCell = -1;
   }
-  return { start, destroy, moveCount: () => G ? G.undo.length : 0, _g: () => G };
+  function resumeData() {
+    if (!G || G.mode === 'tutorial' || G.over) return null;
+    return { o: { mode: G.o.mode, level: G.o.level }, pz: { n: G.n, puzzle: G.val.map((v, i) => G.given[i] ? v : 0), solution: G.sol.slice(), tech: G.tech },
+      val: G.val.slice(), memo: G.memo.slice(), sec: secs(), mistakes: G.mistakes, hints: G.hints, hintTechs: G.hintTechs.slice(), st: Object.assign({}, G.st), moves: G.val.filter((v, i) => v && !G.given[i]).length };
+  }
+  return { start, destroy, resumeData, moveCount: () => G ? G.undo.length : 0, _g: () => G };
 })();
 
 App.init();

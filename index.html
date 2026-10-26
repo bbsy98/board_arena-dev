@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
-<title>한수 v0.7.0 — 보드게임 학습 앱</title>
+<title>한수 v0.9.0 — 보드게임 학습 앱</title>
 <link href="./css/style.css" rel="stylesheet"/>
-<meta content="#14161c" name="theme-color"/><meta content="장기, 체스, 바둑, 스도쿠를 배우고 AI와 즐기는 브라우저 보드게임" name="description"/><link href="./manifest.webmanifest" rel="manifest"/></head>
+<meta content="#14161c" name="theme-color"/><meta content="장기, 체스, 바둑, 스도쿠를 배우고 AI와 즐기는 브라우저 보드게임" name="description"/><link href="./manifest.webmanifest" rel="manifest"/><link href="./icons/favicon-64.png" rel="icon" type="image/png"/><link href="./icons/apple-touch-icon.png" rel="apple-touch-icon"/></head>
 <body>
 <!-- ============ 로그인 / 회원가입 ============ -->
 <div id="auth">
@@ -39,15 +39,16 @@
 <!-- ============ 홈 ============ -->
 <div class="hidden" id="home">
 <div class="hbar">
-<h1><span>한수</span><small>v0.7.0</small></h1>
-<div class="who"><div class="av" id="hAv">?</div><div><b id="hNick">-</b><br/><small id="hId">-</small></div><button class="ghost" id="btnBackup">💾 백업</button><button class="ghost" id="btnRestore">📂 불러오기</button><button class="ghost" id="btnUi">🎨 화면</button><button class="ghost" id="btnLogout">로그아웃</button></div>
+<h1><span>한수</span><small id="appVer">v0.9.0</small></h1>
+<div class="who"><div class="av" id="hAv">?</div><div><b id="hNick">-</b><br/><small id="hId">-</small></div><button class="ghost" id="btnBackup">💾 백업</button><button class="ghost" id="btnRestore">📂 불러오기</button><button class="ghost" id="btnUi">⚙️ 설정</button><button class="ghost" id="btnLogout">로그아웃</button></div>
 </div>
 <div id="bkNotice"></div>
 <div class="card"><div style="font-size:13px;color:var(--sub);margin-bottom:6px">내 기록</div><div aria-label="게임 기록표" class="record-scroll" role="region" tabindex="0"><table class="recTable" id="recTable"></table></div></div>
 <div class="games" id="games"></div>
+<div class="card report"><h3>📈 학습 리포트 <small>최근 7일 · 업적</small></h3><div id="reportBox"></div></div>
 <div class="card stylebox"><h3>🧭 나의 기풍 <small>실제로 둔 수를 바탕으로 분석해요</small></h3><div class="sgrid4" id="styleGrid"></div></div>
 <div class="card recent"><h3>최근 기록</h3><ul id="recentList"></ul></div>
-<div class="foot">한수 v0.7.0 · 계정별 기록 관리 · AI는 기기 안에서 동작합니다</div>
+<div class="foot">한수 v0.9.0 · 계정별 기록 관리 · 모든 AI와 기록은 이 기기 안에서만 동작합니다</div>
 </div>
 <!-- ============ 게임 ============ -->
 <div class="hidden" id="game">

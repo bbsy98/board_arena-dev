@@ -1,9 +1,9 @@
-/* 한수 v0.7.0 — 캐시 범위 제한 및 오프라인 대응 */
+/* 한수 v0.9.0 — 캐시 범위 제한 및 오프라인 대응 (버전을 올리면 새 파일이 확실히 반영됨) */
 'use strict';
 
 const CACHE_PREFIX = 'hansu-board-arena-';
-const CACHE_NAME = 'hansu-board-arena-v0.7.1';
-const LEGACY_CACHE_NAMES = ['hansu-v0.6.0', 'hansu-board-arena-v0.6.3', 'hansu-board-arena-v0.7.0'];
+const CACHE_NAME = 'hansu-board-arena-v0.9.0';
+const LEGACY_CACHE_NAMES = ['hansu-v0.6.0', 'hansu-board-arena-v0.6.3', 'hansu-board-arena-v0.7.0', 'hansu-board-arena-v0.7.1', 'hansu-board-arena-v0.8.0'];
 const APP_SHELL = [
   './',
   './index.html',
@@ -24,7 +24,12 @@ const APP_SHELL = [
   './js/games/sudoku.js',
   './workers/janggi-worker.js',
   './workers/chess-worker.js',
-  './workers/go-worker.js'
+  './workers/go-worker.js',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+  './icons/apple-touch-icon.png',
+  './icons/favicon-64.png'
 ];
 
 const appUrl = (path) => new URL(path, self.registration.scope).href;

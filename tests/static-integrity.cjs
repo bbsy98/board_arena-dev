@@ -21,10 +21,16 @@ const shellBlock = (sw.match(/const APP_SHELL = \[([\s\S]*?)\];/) || [])[1];
 assert.ok(shellBlock, 'service worker must declare APP_SHELL');
 const assets = [...shellBlock.matchAll(/["'](\.[^"']+)["']/g)].map(m => m[1]);
 for (const asset of assets) assert.ok(exists(asset.slice(2)), `missing service-worker asset: ${asset}`);
-assert.match(sw, /hansu-board-arena-v0\.6\.3/, 'service-worker cache version should match release');
+const version = JSON.parse(read('package.json')).version;
+const cfgVer = (read('js/config.js').match(/APP_VERSION = '([^']+)'/) || [])[1];
+assert.equal(cfgVer, version, 'js/config.js APP_VERSION must match package.json version');
+assert.ok(sw.includes(`hansu-board-arena-v${version}'`), 'service-worker CACHE_NAME must match package.json version');
+assert.ok(html.includes(`<title>한수 v${version}`), 'index.html title must match package.json version');
 
 const manifest = JSON.parse(read('manifest.webmanifest'));
 assert.ok(manifest.name && manifest.start_url && manifest.scope, 'web manifest must have required fields');
+assert.ok(Array.isArray(manifest.icons) && manifest.icons.some(i => i.sizes === '192x192') && manifest.icons.some(i => i.sizes === '512x512'), 'manifest needs 192 and 512 icons for installation');
+for (const icon of manifest.icons) assert.ok(exists(icon.src.replace(/^\.\//, '')), `missing manifest icon: ${icon.src}`);
 for (const worker of ['workers/chess-worker.js', 'workers/janggi-worker.js', 'workers/go-worker.js']) {
   const source = read(worker);
   for (const match of source.matchAll(/importScripts\(['"]([^'"]+)['"]\)/g)) {
@@ -48,4 +54,4 @@ for (const file of jsFiles) {
 }
 console.log(`PASS: ${htmlRefs.length} HTML asset references exist; no duplicate IDs`);
 console.log(`PASS: ${assets.length} service-worker assets and Worker imports exist`);
-console.log(`PASS: web manifest is valid; ${jsFiles.length} JavaScript files pass syntax checks`);
+console.log(`PASS: web manifest and icons are valid; version ${version} is consistent; ${jsFiles.length} JavaScript files pass syntax checks`);

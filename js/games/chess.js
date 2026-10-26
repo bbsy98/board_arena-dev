@@ -6,6 +6,7 @@ const ChessGame = (() => {
   const NAME = { 1: '폰', 2: '나이트', 3: '비숍', 4: '룩', 5: '퀸', 6: '킹' };
   const PVAL = { 1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0 };
   let G = null;
+  const sqName = CE.sqName;
   const ctx = { worker: null, reqId: 0 };
   const cname = s => s === WHITE ? '백' : '흑';
   const josa = (w, a, b) => {
@@ -23,7 +24,7 @@ const ChessGame = (() => {
     const human = tut ? WHITE : o.human;
     G = { pos, human, ai: human ^ 8, flip: human === BLACK, sel: -1, targets: [], last: 0, anim: null, capFx: null, hl: null, mode: o.mode,
           over: false, thinking: false, hist: [], plies: 0, caps: { 0: [], 8: [] }, o, prevEval: null, blunders: [], best: null, lastHumanTxt: '', lastHumanNo: 0,
-          hints: 0, hintStage: 0, hintMove: 0, warns: 0, heeded: 0, undos: 0, coachBase: null };
+          hints: 0, hintStage: 0, hintMove: 0, warns: 0, heeded: 0, undos: 0, coachBase: null, rec: [], rec0: 0 };
     G.st = stNew({ castled: 0, castleMove: 0, earlyQ: 0 }); Adapt.init(G, o.level || 1); G.turnT = Date.now();
     const host = $('boardHost');
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -39,19 +40,44 @@ const ChessGame = (() => {
     else Shell.buttons([{ id: 'cDraw', label: '무승부 제안', on: offerDraw }, { id: 'cRes', label: '기권', cls: 'danger', on: resign }]);
     if (!tut) Shell.log(`대국 시작 — 나는 ${cname(G.human)}`, 'sys');
     if (o.mode === 'train') Shell.coach('수를 두기 전에 위험하면 제가 알려줄게요. 막히면 <b>💡 힌트</b>를 눌러 보세요.');
+    if (o.resume) restore(o.resume);
     resize(); render(); update();
     window.addEventListener('resize', resize);
-    if (!tut && G.pos.side === G.ai) setTimeout(aiMove, 300);
+    if (!tut && G.pos.side === G.ai) setTimeout(aiMove, 300); else prefetchCoach();
   }
-  function destroy() { ctx.reqId++; if (ctx.cancel) ctx.cancel(); if (ctx.worker) ctx.worker.terminate(); ctx.worker = null; window.removeEventListener('resize', resize); G = null; const pr = $('promo'); if (pr) pr.remove(); }
+  // ---------- 저장 · 이어하기 ----------
+  function restore(r) {
+    if (!Array.isArray(r.moves)) throw new Error('저장 데이터 형식 오류');
+    r.moves.forEach(m => {
+      if (!G.pos.legalMoves().includes(m)) throw new Error('저장된 수순이 올바르지 않아요');
+      const mover = G.pos.side, t = (m >> 7) & 127, flag = m >> 17, san = CE.san(G.pos, m);
+      let cap = G.pos.b[t]; if (flag & 1) cap = P | (mover ^ 8);
+      G.rec.push({ s: G.pos.state(), m, h: mover === G.human, txt: san, side: mover });
+      G.pos.make(m); G.plies++; G.last = m; if (cap) G.caps[mover].push(cap);
+      Shell.log(`${Math.ceil(G.plies / 2)}${mover === WHITE ? '.' : '...'} ${san}`, mover === G.human ? 'me' : 'ai');
+    });
+    Resume.restoreCommon(G, r);
+    Shell.log('— 저장된 대국을 이어서 둡니다 —', 'sys');
+  }
+  function resumeData() {
+    if (!G || G.mode === 'tutorial' || G.over) return null;
+    return Object.assign({ o: { mode: G.o.mode, level: G.o.level, human: G.human }, moves: G.rec.map(r => r.m), prevEval: G.prevEval }, Resume.commonData(G));
+  }
+  function coachKey() { return G.pos.h1 + ':' + G.pos.h2 + ':' + G.plies; }
+  function prefetchCoach() {
+    if (!G || G.mode !== 'train' || G.over || G.pos.side !== G.human) return;
+    const st = G.pos.state(), clone = G.pos.clone();
+    G.coachP = { key: coachKey(), p: helperCall(ctx, 'coachW', 'srcChess', { state: st, opts: LEVELS.coach }, () => CE.think(clone, LEVELS.coach), LEVELS.coach.timeMs) };
+  }
+  function destroy() { helperStop(ctx, 'coachW'); helperStop(ctx, 'hintW'); ctx.reqId++; if (ctx.cancel) ctx.cancel(); if (ctx.worker) ctx.worker.terminate(); ctx.worker = null; window.removeEventListener('resize', resize); G = null; const pr = $('promo'); if (pr) pr.remove(); }
   function resize() { const s = boardPx(1); const svg = $('csvg'); if (svg) { svg.style.width = s + 'px'; svg.style.height = s + 'px'; } }
-  function snapshot() { return { pos: G.pos.clone(), last: G.last, plies: G.plies, caps: { 0: G.caps[0].slice(), 8: G.caps[8].slice() }, log: $('gLog').innerHTML, prevEval: G.prevEval, bl: G.blunders.length }; }
+  function snapshot() { return { rl: G.rec.length, pos: G.pos.clone(), last: G.last, plies: G.plies, caps: { 0: G.caps[0].slice(), 8: G.caps[8].slice() }, log: $('gLog').innerHTML, prevEval: G.prevEval, bl: G.blunders.length }; }
 
   function tutMove(m) {
     const L = LESSONS.chess[G.o.lesson], g = L.goal, f = m & 127, t = (m >> 7) & 127, flag = m >> 17, cap = G.pos.b[t];
     const snap = G.pos.clone();
     G.pos.make(m); G.last = m; G.anim = { f, t }; G.capFx = cap ? t : null; G.sel = -1; G.targets = []; G.hl = null;
-    render(); G.anim = null; G.capFx = null;
+    render(); G.anim = null; G.capFx = null; Sound.play(cap ? 'capture' : 'move');
     let pass = false;
     if (g.type === 'capture') pass = t === g.sq && !!cap;
     else if (g.type === 'escape') pass = !G.pos.inCheck(WHITE);
@@ -73,6 +99,7 @@ const ChessGame = (() => {
     const san = CE.san(pos, m);
     let cap = pos.b[t]; if (flag & 1) cap = P | (mover ^ 8);
     const piece = pos.b[f];
+    G.rec.push({ s: pos.state(), m, h: !!byHuman, txt: san, side: mover });
     pos.make(m);
     if (byHuman) {
       const st = G.st, no0 = Math.ceil((G.plies + 1) / 2);
@@ -84,21 +111,42 @@ const ChessGame = (() => {
       if ((piece & 7) === Q && no0 <= 5) st.earlyQ = 1;
     }
     G.plies++; G.last = m; G.anim = { f, t }; G.capFx = cap ? t : null;
+    G.aiTxt = byHuman ? '' : `🤖 AI: ${NAME[piece & 7]} ${sqName(f)}→${sqName(t)}${cap ? ` (내 ${NAME[cap & 7]} 잡음)` : ''}`;
     const no = Math.ceil(G.plies / 2);
     Shell.log(`${no}${mover === WHITE ? '.' : '...'} ${san}`, byHuman ? 'me' : 'ai');
     if (byHuman) { G.lastHumanTxt = san; G.lastHumanNo = no; }
-    if (cap) {
-      G.caps[mover].push(cap);
-      if (byHuman) Shell.toast(`${josa(NAME[cap & 7], '을', '를')} 잡았다!`, `+${PVAL[cap & 7]}`, 'good');
-      else Shell.toast(`내 ${josa(NAME[cap & 7], '이', '가')} 잡혔다!`, `${san} · -${PVAL[cap & 7]}`, 'bad');
-    }
+    if (cap) { G.caps[mover].push(cap); G.capVal = { v: PVAL[cap & 7], me: byHuman }; }
+    const evt = { cap, piece, byHuman, promo: (m >> 14) & 7, castle: !!(flag & 2) };
     G.sel = -1; G.targets = []; G.hl = null; G.hintStage = 0; G.coachBase = null;
     if (G.mode === 'train') Shell.coach('');
-    render(); G.anim = null; G.capFx = null;
+    render(); G.anim = null; G.capFx = null; G.capVal = null;
     if (checkEnd(mover)) return;
-    if (pos.inCheck(pos.side)) { if (pos.side === G.human) Shell.toast('체크!', '킹을 지키세요', 'bad'); else Shell.toast('체크!', '', 'warn'); }
-    update();
-    if (pos.side === G.ai) setTimeout(aiMove, 380); else G.turnT = Date.now();
+    announce(evt, pos.inCheck(pos.side));
+    update(); Shell.autosave();
+    if (pos.side === G.ai) setTimeout(aiMove, Shell.aiDelay(380)); else { G.turnT = Date.now(); prefetchCoach(); }
+  }
+  // 대국 사건 알림: 잡기·체크·승격을 한 번에, 어떤 기물로 무엇을 잡았는지 보여 줌
+  function announce(e, chk) {
+    const kid = isKid(), toHuman = G.pos.side === G.human;
+    Shell.sfx(chk && toHuman ? 'check' : e.cap ? (e.byHuman ? 'capture' : 'lose') : chk ? 'check' : 'move');
+    const chkBadge = chk ? (toHuman ? '체크 받음!' : '체크!') : '';
+    if (e.cap) {
+      const v = PVAL[e.cap & 7], chip = Chip.vs(Chip.chess(e.piece), Chip.chess(e.cap)), prio = chk || v >= 3 ? 'major' : 'minor';
+      if (e.byHuman) Shell.notify({ kind: 'good', chip, prio, badge: chkBadge,
+        title: kid ? `우와! ${josa(NAME[e.cap & 7], '을', '를')} 잡았어!` : `상대 ${josa(NAME[e.cap & 7], '을', '를')} 잡았어요`,
+        sub: kid ? `+${v}점 ⭐` : `내 ${roJosa(NAME[e.piece & 7])} 잡았어요 · <b>+${v}점</b>` });
+      else Shell.notify({ kind: 'bad', chip, prio, badge: chkBadge,
+        title: kid ? `앗, 내 ${josa(NAME[e.cap & 7], '이', '가')} 잡혔어` : `내 ${josa(NAME[e.cap & 7], '을', '를')} 잃었어요`,
+        sub: kid ? (chk ? '킹을 먼저 지키자!' : '괜찮아, 다시 해 보자!') : `AI ${NAME[e.piece & 7]}에게 잡혔어요 · <b>−${v}점</b>${chk ? ' · 킹을 먼저 지키세요' : ''}` });
+      return;
+    }
+    if (e.promo) { Shell.notify({ kind: e.byHuman ? 'good' : 'bad', prio: 'major', chip: Chip.chess(e.promo | (e.byHuman ? G.human : G.ai)), badge: chkBadge, title: e.byHuman ? `폰이 ${roJosa(NAME[e.promo])} 승격했어요` : `AI 폰이 ${roJosa(NAME[e.promo])} 승격했어요`, sub: '마지막 줄에 도착한 폰은 다른 기물로 바뀌어요' }); return; }
+    if (chk) {
+      if (toHuman) Shell.notify({ kind: 'bad', prio: 'major', chip: Chip.chess(K | G.human), title: kid ? '체크야! 킹을 지켜!' : '체크를 받았어요', sub: '킹을 피하거나, 막거나, 공격한 기물을 잡으세요' });
+      else Shell.notify({ kind: 'warn', prio: 'major', chip: Chip.chess(K | G.ai), title: kid ? '체크! 멋져!' : '체크!', sub: 'AI 킹을 몰아붙였어요' });
+      return;
+    }
+    if (e.castle) Shell.notify({ kind: 'info', prio: 'minor', chip: Chip.chess(K | (e.byHuman ? G.human : G.ai)) + Chip.chess(R | (e.byHuman ? G.human : G.ai)), title: e.byHuman ? '캐슬링 완료' : 'AI가 캐슬링했어요', sub: '킹은 안전한 구석으로, 룩은 가운데로' });
   }
   function checkEnd(mover) {
     const pos = G.pos, lm = pos.legalMoves(), me = G.human;
@@ -123,7 +171,7 @@ const ChessGame = (() => {
     G.thinking = true; update();
     const lv = G.mode === 'train' ? G.lvNow : G.o.level;
     const opts = Object.assign({}, LEVELS.board[lv]), myG = G, st = G.pos.state();
-    const res = await engineCall(ctx, { state: st, opts }, () => CE.think(CE.Pos.fromState(st), Object.assign({}, opts, { timeMs: Math.min(opts.timeMs || 3000, 3000) })), opts.timeMs || 3000, 700);
+    const res = await engineCall(ctx, { state: st, opts }, () => CE.think(CE.Pos.fromState(st), Object.assign({}, opts, { timeMs: Math.min(opts.timeMs || 3000, 3000) })), opts.timeMs || 3000, Shell.aiDelay(700));
     if (!res || myG !== G || G.over) return;
     G.thinking = false;
     const s = res.score, mateLike = Math.abs(s) > CE.MATE - 300;
@@ -142,13 +190,19 @@ const ChessGame = (() => {
 
   // ---------- 교육: 코치 ----------
   async function coachCheck(m) {
-    G.moveLoss = null;
-    if (!G.coachBase) G.coachBase = CE.think(G.pos.clone(), LEVELS.coach);
+    G.moveLoss = null; G.moveRank = undefined;
+    if (!G.coachBase) {
+      if (!G.coachP || G.coachP.key !== coachKey()) prefetchCoach();
+      const myG = G, cb = await G.coachP.p;
+      if (G !== myG) return false;
+      G.coachBase = cb || CE.think(G.pos.clone(), LEVELS.coach);
+    }
     const p2 = G.pos.clone(); p2.make(m);
     if (!p2.legalMoves().length) { G.moveLoss = 0; return true; }
     const all = G.coachBase.all || [], e = all.find(x => x.m === m);
-    const loss = e && all.length ? Math.max(0, all[0].s - e.s) : 0;
-    G.moveLoss = loss;
+    if (!e) { G.moveLoss = null; return true; }
+    const loss = all.length ? Math.max(0, all[0].s - e.s) : 0;
+    G.moveLoss = loss; G.moveRank = all.filter(x => x.s > e.s).length;
     if (loss < 150) return true;
     const r = CE.think(p2, Object.assign({}, LEVELS.coach, { maxDepth: 1, wantAll: 0 })), after = e ? e.s : -r.score;
     const tq = r.move ? (r.move >> 7) & 127 : -1, victim = tq >= 0 ? p2.b[tq] : 0;
@@ -158,15 +212,16 @@ const ChessGame = (() => {
     else msg = '이 수를 두면 형세가 많이 나빠져요.';
     G.warns++;
     G.hl = { threat: r.move, danger: victim ? [tq] : [] };
+    G.sel = -1; G.targets = [];
     const keep = G.pos; G.pos = p2; render(); G.pos = keep;
-    const go = await Modal.ask('⚠️ 잠깐!', msg, '그래도 두기', false, false, '다시 생각하기');
+    const go = await Shell.coachAsk('⚠️ 잠깐!', msg);
     if (!G) return false;
     G.hl = null; render();
     if (!go) { G.heeded++; Shell.coach('좋아요! 다른 수를 찾아봐요. 막히면 <b>💡 힌트</b>를 눌러 보세요.'); }
     return go;
   }
-  function hint() {
-    if (!G || G.over || G.pos.side !== G.human || G.thinking) return;
+  async function hint() {
+    if (!G || G.over || G.pos.side !== G.human || G.thinking || G.busy) return;
     const pos = G.pos;
     G.hintThisTurn = true;
     if (G.hintStage === 0) {
@@ -181,8 +236,12 @@ const ChessGame = (() => {
       t += targets.length ? `🟢 잡을 수 있는 상대 기물: <b>${targets.map(q => NAME[pos.b[q] & 7]).join(', ')}</b>` : '🟢 지금 바로 잡을 수 있는 상대 기물은 없어요.';
       Shell.coach(t + '<br><span style="color:var(--sub)">힌트를 한 번 더 누르면 움직일 기물을 알려줘요.</span>');
     } else if (G.hintStage === 1) {
-      const r = CE.think(pos.clone(), { maxDepth: 5, timeMs: 1500 });
-      if (!r.move) return;
+      const myG = G, ho = { maxDepth: 5, timeMs: 1500 }, clone = pos.clone(), pl0 = G.plies;
+      G.busy = true; Shell.info('💡 힌트를 계산하고 있어요…');
+      const r = await helperCall(ctx, 'hintW', 'srcChess', { state: pos.state(), opts: ho }, () => CE.think(clone, ho), ho.timeMs);
+      if (G !== myG) return;
+      G.busy = false; Shell.info('');
+      if (!r || !r.move || G.over || G.plies !== pl0) { update(); return; }
       G.hintMove = r.move; G.hl = { from: r.move & 127 }; G.hintStage = 2;
       Shell.coach(`<b>힌트 2/3 · 움직일 기물</b><br>파란 동그라미의 <b>${josa(NAME[pos.b[r.move & 127] & 7], '을', '를')}</b> 움직여 보세요. 어디로 가면 좋을까요?`);
     } else if (G.hintStage === 2) {
@@ -221,7 +280,7 @@ const ChessGame = (() => {
     if (G.mode === 'train') {
       G.busy = true; const ok = await coachCheck(m); if (G) G.busy = false;
       if (!G || !ok) { if (G) { G.sel = -1; G.targets = []; render(); } return; }
-      if (G.moveLoss !== null) Adapt.step(G, Adapt.classify(G.moveLoss, LEVELS.adapt.chess));
+      if (G.moveLoss !== null) Adapt.step(G, Adapt.classify(G.moveLoss, LEVELS.adapt.chess, G.moveRank));
     }
     G.hist.push(snapshot()); doMove(m, true);
   }
@@ -238,19 +297,19 @@ const ChessGame = (() => {
     $('boardHost').appendChild(d);
   }
   function undo() {
-    if (!G || !G.hist.length || G.over) return;
+    if (!G || !G.hist.length || G.over || G.busy) return;
     ctx.reqId++; if (G.thinking) { ctx.worker && ctx.worker.terminate(); ctx.worker = makeWorker('srcChess'); }
-    stopProg(); G.thinking = false; G.undos++;
+    stopProg(); G.thinking = false; G.undos++; Notify.clear(); G.aiTxt = '';
     const s = G.hist.pop();
-    G.pos = s.pos; G.last = s.last; G.plies = s.plies; G.caps = s.caps; G.prevEval = s.prevEval; G.blunders.length = s.bl;
+    G.pos = s.pos; G.last = s.last; G.plies = s.plies; G.rec.length = s.rl; G.caps = s.caps; G.prevEval = s.prevEval; G.blunders.length = s.bl;
     $('gLog').innerHTML = s.log; G.sel = -1; G.targets = []; G.hl = null; G.hintStage = 0; G.coachBase = null; Shell.coach('');
-    render(); update();
+    render(); update(); Shell.autosave(); prefetchCoach();
   }
   function offerDraw() {
     if (!G || G.over || G.thinking) return;
     const aiEval = G.prevEval === null ? 0 : -G.prevEval;
     if (aiEval <= -50 || (Math.abs(aiEval) < 30 && G.plies > 60)) end('draw', '무승부 합의');
-    else Shell.toast('AI가 무승부를 거절했어요', aiEval > 0 ? 'AI가 유리하다고 판단' : '아직 승부가 남았다고 판단', 'info');
+    else Shell.toast('AI가 무승부를 거절했어요', aiEval > 0 ? 'AI는 자기가 유리하다고 봐요' : '아직 승부가 남았다고 봐요', 'info');
   }
   async function resign() { if (!G || G.over) return; const myG = G; if (!(await confirmResign()) || myG !== G || G.over) return; end('loss', '기권'); }
   function update() {
@@ -260,7 +319,7 @@ const ChessGame = (() => {
     if (G.over) Shell.status('대국 종료');
     else if (pos.side === G.ai) Shell.status(`🤖 AI(${cname(G.ai)})가 생각 중<span class="dots"></span>`, 'think');
     else if (chk) Shell.status('⚠️ 체크! 킹을 지키세요', 'alert');
-    else Shell.status(`👉 내 차례 (${cname(G.human)})`, 'me');
+    else Shell.status(`👉 내 차례 (${cname(G.human)})${G.aiTxt ? `<small class="stsub">${G.aiTxt}</small>` : ''}`, 'me');
     const busy = G.over || G.thinking;
     if ($('cUndo')) $('cUndo').disabled = busy || !G.hist.length;
     if ($('cHint')) $('cHint').disabled = busy || pos.side !== G.human || G.hintStage >= 3;
@@ -309,10 +368,51 @@ const ChessGame = (() => {
     if (hl.from !== undefined) { const [x, y] = xy(hl.from); h += `<circle cx="${x}" cy="${y}" r="36" fill="none" stroke="#2f7bff" stroke-width="5"><animate attributeName="r" values="31;39;31" dur="1.1s" repeatCount="indefinite"/></circle>`; }
     if (hl.to !== undefined) { const [x, y] = xy(hl.to); h += `<rect x="${x - SQ / 2 + 4}" y="${y - SQ / 2 + 4}" width="${SQ - 8}" height="${SQ - 8}" fill="rgba(47,123,255,.25)" stroke="#2f7bff" stroke-width="3"/>` + arrowSvg(hl.from, hl.to, '#2f7bff', 'caHint', 10); }
     if (hl.threat) h += arrowSvg(hl.threat & 127, (hl.threat >> 7) & 127, '#e5484d', 'caThr', 10);
-    if (G.capFx !== null) { const [x, y] = xy(G.capFx); h += `<circle cx="${x}" cy="${y}" r="20" fill="none" stroke="#ff4d4d" stroke-width="7" opacity="0"><animate attributeName="r" from="20" to="78" begin=".26s" dur=".7s" fill="freeze"/><animate attributeName="opacity" values="1;0" begin=".26s" dur=".7s" fill="freeze"/></circle>`; }
+    if (G.capFx !== null) {
+      const [x, y] = xy(G.capFx); h += `<circle cx="${x}" cy="${y}" r="20" fill="none" stroke="#ff4d4d" stroke-width="7" opacity="0"><animate attributeName="r" from="20" to="78" begin=".26s" dur=".7s" fill="freeze"/><animate attributeName="opacity" values="1;0" begin=".26s" dur=".7s" fill="freeze"/></circle>`;
+      if (G.capVal) {
+        const cv = G.capVal, col = cv.me ? '#1f9d5c' : '#d63b40';
+        h += `<g pointer-events="none" opacity="0"><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.15;.7;1" begin=".25s" dur="1.3s" fill="freeze"/><animateTransform attributeName="transform" type="translate" from="0 0" to="0 -34" begin=".25s" dur="1.3s" fill="freeze"/><text x="${x}" y="${y - 30}" text-anchor="middle" font-size="30" font-weight="900" fill="${col}" stroke="#fff" stroke-width="5" paint-order="stroke" font-family="sans-serif">${cv.me ? '+' : '−'}${cv.v}</text></g>`;
+      }
+    }
     G.targets.forEach(q => { const [x, y] = xy(q); h += pos.b[q] ? `<circle cx="${x}" cy="${y}" r="36" fill="none" stroke="rgba(200,40,40,.85)" stroke-width="6"/>` : `<circle cx="${x}" cy="${y}" r="12" fill="rgba(40,120,50,.7)"/>`; });
     for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) { const sq = r * 16 + f, [x, y] = xy(sq); h += `<rect x="${x - SQ / 2}" y="${y - SQ / 2}" width="${SQ}" height="${SQ}" fill="transparent" data-sq="${sq}" style="cursor:pointer"/>`; }
     svg.innerHTML = h;
+    // SVG 애니메이션 시계를 0으로: 이동·잡기 효과가 매번 처음부터 재생되게 함 (v0.7까지는 재생되지 않던 문제)
+    try { if (svg.setCurrentTime) svg.setCurrentTime(0); } catch (e) {}
   }
-  return { start, destroy, moveCount: () => G ? G.plies : 0, _g: () => G, _render: () => { render(); update(); } };
+
+  // ---------- 복기 · 대국 후 분석 ----------
+  const ANALYZE = { exact: 1, maxDepth: 3, noJitter: 1, wantAll: 1, timeMs: 4000 };
+  const clampEval = v => Math.max(-2000, Math.min(2000, v));
+  const review = {
+    len: () => G ? G.rec.length : 0,
+    moves: () => G ? G.rec.map((r, i) => { const no = Math.floor(G.rec0 + i / 2) + 1; return { txt: r.txt, h: r.h, side: r.side === WHITE ? 0 : 1, no, lab: r.side === WHITE ? no + '.' : no + '…' }; }) : [],
+    show(k, best) {
+      if (!G) return;
+      if (!G.finalPos) G.finalPos = G.pos;
+      G.pos = k >= G.rec.length ? G.finalPos : CE.Pos.fromState(G.rec[k].s);
+      G.last = k > 0 ? G.rec[k - 1].m : 0;
+      G.hl = best ? { from: best & 127, to: (best >> 7) & 127 } : null;
+      G.sel = -1; G.targets = []; G.anim = null; G.capFx = null;
+      render();
+    },
+    jobs() {
+      const out = [];
+      G.rec.forEach((r, i) => { if (r.h) out.push({ idx: i, msg: { state: r.s, opts: ANALYZE }, local: () => CE.think(CE.Pos.fromState(r.s), Object.assign({}, ANALYZE, { timeMs: 1500 })) }); });
+      return { src: 'srcChess', list: out, parallel: 2 };
+    },
+    judge(jobs, results) {
+      const res = {};
+      jobs.list.forEach((j, n) => {
+        const r = results[n]; if (!r || !r.all || !r.all.length) return;
+        const rec = G.rec[j.idx], played = r.all.find(x => x.m === rec.m); if (!played) return;
+        const best = r.all[0], loss = Math.max(0, clampEval(best.s) - clampEval(played.s)), rank = r.all.filter(x => x.s > played.s).length;
+        const pos = CE.Pos.fromState(rec.s);
+        res[j.idx] = { decided: Math.abs(best.s) >= 1000, loss, cls: Adapt.classify(loss, LEVELS.adapt.chess, rank), best: best.m === rec.m ? 0 : best.m, bestTxt: best.m === rec.m ? '' : CE.san(pos, best.m), unit: 'pawn' };
+      });
+      return res;
+    }
+  };
+  return { start, destroy, review, resumeData, moveCount: () => G ? G.plies : 0, _g: () => G, _render: () => { render(); update(); } };
 })();

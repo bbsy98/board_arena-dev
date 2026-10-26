@@ -1,4 +1,3 @@
-
 // ======================= 장기 엔진 v3 (PVS + TT + Null move + LMR) + 10단계 강도 조절 =======================
 var JanggiEngine = (function () {
   'use strict';
@@ -135,7 +134,7 @@ var JanggiEngine = (function () {
             if ((p & 7) === C) break;
             screen = true;
           } else {
-            if (pside(p) === by && (p & 7) === C) return true;
+            if (pside(p) === by && (p & 7) === C && (b[sq] & 7) !== C) return true;
             break;
           }
         }
@@ -472,4 +471,3 @@ if (typeof window === 'undefined' && typeof self !== 'undefined' && typeof impor
   };
 }
 if (typeof module !== 'undefined') module.exports = JanggiEngine;
-

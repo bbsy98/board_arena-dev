@@ -10,6 +10,8 @@ const isKid = () => { const u = Store.cur(); return !!(u && u.prefs.ui === 'kid'
 const mn = m => (isKid() ? MODE_NAME_K : MODE_NAME_N)[m];
 const RES_LABEL = { win: '승리', loss: '패배', draw: '무승부' };
 const resLabel = (g, r, mode) => mode === 'tutorial' ? '완료' : g === 'sudoku' ? (r === 'win' ? '완성' : '포기') : RES_LABEL[r];
+// 받침이 ㄹ이면 '로'(예: 졸로), 그 외 받침이 있으면 '으로'
+const roJosa = w => { const c = String(w).charCodeAt(String(w).length - 1) - 0xAC00, j = c >= 0 && c < 11172 ? c % 28 : 0; return w + (j && j !== 8 ? '으로' : '로'); };
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // ---------- 안전한 저장소 (막혀 있으면 메모리로 대체) ----------
@@ -65,6 +67,9 @@ const Store = {
     u.nick = typeof u.nick === 'string' && u.nick.trim() ? u.nick.trim().slice(0, 12) : u.id;
     u.prefs = this.object(u.prefs);
     u.prefs.ui = u.prefs.ui === 'kid' ? 'kid' : 'normal';
+    u.prefs.sound = u.prefs.sound !== false;
+    u.prefs.notify = ['all', 'key', 'off'].includes(u.prefs.notify) ? u.prefs.notify : 'all';
+    u.prefs.aiSpeed = ['fast', 'normal', 'slow'].includes(u.prefs.aiSpeed) ? u.prefs.aiSpeed : 'normal';
     u.prefs.match = this.object(u.prefs.match); u.prefs.train = this.object(u.prefs.train);
     u.stats = this.object(u.stats); u.tut = this.object(u.tut); u.style = this.object(u.style);
     GAMES.forEach(g => {
@@ -99,8 +104,25 @@ const Store = {
       date: this.count(e.date, 8640000000000000) || Date.now(),
       level: this.level(e.level, 1), endLevel: this.level(e.endLevel, this.level(e.level, 1)),
       reason: typeof e.reason === 'string' ? e.reason.slice(0, 300) : '',
-      moves: this.count(e.moves, 100000), hints: this.count(e.hints, 100000), warns: this.count(e.warns, 100000)
+      moves: this.count(e.moves, 100000), hints: this.count(e.hints, 100000), warns: this.count(e.warns, 100000),
+      ...(e.acc !== undefined && e.acc !== null ? { acc: this.count(e.acc, 100), bl: this.count(e.bl, 10000), sl: this.count(e.sl, 10000) } : {})
     }));
+    const rs = this.object(u.resume), cleanR = {};
+    GAMES.forEach(g => {
+      const r = rs[g];
+      if (!r || typeof r !== 'object' || Array.isArray(r) || !r.o || typeof r.o !== 'object') return;
+      if (!['train', 'match'].includes(r.o.mode)) return;
+      if (g !== 'sudoku' && (!Array.isArray(r.moves) || r.moves.length > 3000 || !r.moves.every(Number.isInteger))) return;
+      if (g === 'sudoku' && (!r.pz || typeof r.pz !== 'object')) return;
+      cleanR[g] = Object.assign({}, r, { o: Resume.cleanOpts(g, r.o), ts: this.count(r.ts, 8640000000000000) || Date.now() });
+    });
+    u.resume = cleanR;
+    const rt = this.object(u.rating), cleanRt = {};
+    GAMES.forEach(g => { const r = this.object(rt[g]); if (Number.isFinite(Number(r.r))) cleanRt[g] = { r: Math.max(100, Math.min(3000, Math.round(Number(r.r)))), n: this.count(r.n, 1000000) }; });
+    u.rating = cleanRt;
+    const ach = this.object(u.ach), cleanAch = {};
+    ACH.forEach(a => { if (ach[a.id]) cleanAch[a.id] = this.count(ach[a.id], 8640000000000000) || 1; });
+    u.ach = cleanAch;
     u.created = this.count(u.created, 8640000000000000) || Date.now();
     u.lastBackup = this.count(u.lastBackup, 8640000000000000);
     u.salt = typeof u.salt === 'string' && /^[0-9a-f]{32}$/i.test(u.salt) ? u.salt.toLowerCase() : null;
@@ -129,9 +151,12 @@ const Store = {
   cur() { const id = this.sessionId(); return id && this.data.users[id] ? this.data.users[id] : null; },
   record(game, mode, result, entry) {
     const u = this.cur(); if (!u) return null;
-    const s = u.stats[game][mode], k = result === 'win' ? 'w' : result === 'loss' ? 'l' : 'd';
-    s[k]++;
-    if (mode === 'match' && result === 'win' && entry.level > (s.best || 0)) s.best = entry.level;
+    // 튜토리얼 완료는 승패 통계가 없으므로 기록(log)에만 남김 (v0.7.0: 여기서 오류가 나 완료 화면이 안 뜨던 문제)
+    const s = u.stats[game] && u.stats[game][mode] ? u.stats[game][mode] : null, k = result === 'win' ? 'w' : result === 'loss' ? 'l' : 'd';
+    if (s) {
+      s[k]++;
+      if (mode === 'match' && result === 'win' && entry.level > (s.best || 0)) s.best = entry.level;
+    }
     u.log.unshift(Object.assign({ game, mode, result, date: Date.now() }, entry));
     if (u.log.length > 300) u.log.length = 300;
     this.save();
@@ -140,6 +165,70 @@ const Store = {
   recent(game, mode, level, n) { const u = this.cur(); if (!u) return []; return u.log.filter(e => e.game === game && e.mode === mode && e.level === level).slice(0, n).map(e => e.result); }
 };
 
+// ---------- 진행 중인 대국 저장 · 이어하기 (계정별 · 게임별 1개) ----------
+const JANGGI_PATS = ['마상마상', '상마상마', '마상상마', '상마마상'];
+const Resume = {
+  get(g) { const u = Store.cur(); return u && u.resume && u.resume[g] ? u.resume[g] : null; },
+  put(g, d) { const u = Store.cur(); if (!u) return; u.resume = u.resume || {}; d.ts = Date.now(); u.resume[g] = d; Store.save(); },
+  clear(g) { const u = Store.cur(); if (u && u.resume && u.resume[g]) { delete u.resume[g]; Store.save(); } },
+  count(r) { return Array.isArray(r.moves) ? r.moves.length : Store.count(r.moves, 1000); },
+  ago(ts) {
+    const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+    return m < 1 ? '방금' : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`;
+  },
+  commonData(G) {
+    return {
+      ad: G.mode === 'train' ? { lvf: G.lvf, lvNow: G.lvNow, lvPath: G.lvPath.slice(-40), quality: Object.assign({}, G.quality) } : null,
+      ctr: { hints: G.hintCount !== undefined ? G.hintCount : G.hints, warns: G.warns, heeded: G.heeded, undos: G.undos },
+      st: G.st
+    };
+  },
+  restoreCommon(G, r) {
+    const n = v => Store.count(v, 100000);
+    if (G.mode === 'train' && r.ad && typeof r.ad === 'object') {
+      const lvf = Number(r.ad.lvf);
+      G.lvf = Number.isFinite(lvf) ? Math.max(1, Math.min(10, lvf)) : G.lvf;
+      G.lvNow = Store.level(r.ad.lvNow, Math.round(G.lvf));
+      G.lvPath = Array.isArray(r.ad.lvPath) && r.ad.lvPath.length ? r.ad.lvPath.slice(-40).map(x => Store.level(x, G.lvNow)) : [G.lvNow];
+      const q = r.ad.quality && typeof r.ad.quality === 'object' ? r.ad.quality : {};
+      G.quality = { good: n(q.good), ok: n(q.ok), slip: n(q.slip), blunder: n(q.blunder) };
+      Adapt.paint(G);
+    }
+    const c = r.ctr && typeof r.ctr === 'object' ? r.ctr : {};
+    if (G.hintCount !== undefined) G.hintCount = n(c.hints); else G.hints = n(c.hints);
+    G.warns = n(c.warns); G.heeded = n(c.heeded); G.undos = n(c.undos);
+    if (r.st && typeof r.st === 'object') Object.keys(r.st).forEach(k => {
+      const v = r.st[k];
+      if (typeof v === 'number' && k in G.st) G.st[k] = n(v);
+      else if (v && typeof v === 'object' && G.st[k] && typeof G.st[k] === 'object') Object.keys(v).slice(0, 40).forEach(kk => { if (/^[A-Za-z0-9가-힣_-]{1,24}$/.test(kk)) G.st[k][kk] = n(v[kk]); });
+    });
+    if (typeof r.prevEval === 'number' && Number.isFinite(r.prevEval)) G.prevEval = r.prevEval;
+  },
+  sudokuPuzzle(r) {
+    const pz = r && r.pz, n = pz && pz.n;
+    if (![4, 6, 9].includes(n)) throw new Error('저장된 퍼즐 형식 오류');
+    const okArr = (a, lo) => Array.isArray(a) && a.length === n * n && a.every(v => Number.isInteger(v) && v >= lo && v <= n);
+    if (!okArr(pz.puzzle, 0) || !okArr(pz.solution, 1)) throw new Error('저장된 퍼즐 형식 오류');
+    const geo = SudokuEngine.geo(n);
+    geo.units.forEach(u => { if (new Set(u.map(i => pz.solution[i])).size !== n) throw new Error('저장된 퍼즐 정답 오류'); });
+    pz.puzzle.forEach((v, i) => { if (v && v !== pz.solution[i]) throw new Error('저장된 퍼즐 정답 오류'); });
+    return { n, puzzle: pz.puzzle.slice(), solution: pz.solution.slice(), tech: Store.count(pz.tech, 99) };
+  },
+  cleanOpts(g, o) {
+    const out = { mode: o.mode === 'train' ? 'train' : 'match', level: Store.level(o.level, 1) };
+    if (g === 'chess') out.human = Number(o.human) === 8 ? 8 : 0;
+    if (g === 'janggi') {
+      out.human = Number(o.human) === 1 ? 1 : 0; out.bik = o.bik === 'points' ? 'points' : 'draw';
+      out.pat = JANGGI_PATS.includes(o.pat) ? o.pat : JANGGI_PATS[0]; out.aiPat = JANGGI_PATS.includes(o.aiPat) ? o.aiPat : 'rand';
+    }
+    if (g === 'go') {
+      out.size = [9, 13, 19].includes(Number(o.size)) ? Number(o.size) : 9; out.human = Number(o.human) === 2 ? 2 : 1;
+      out.hcp = Math.max(0, Math.min(9, Store.count(o.hcp, 9))); if (out.hcp === 1) out.hcp = 0;
+      out.komi = ['7.5', '6.5', '0.5'].includes(String(o.komi)) ? String(o.komi) : 'auto';
+    }
+    return out;
+  }
+};
 // ---------- 순수 JS SHA-256 · HMAC · PBKDF2 (WebCrypto가 막힌 환경용, 결과는 동일) ----------
 const toHex = a => Array.from(a).map(b => b.toString(16).padStart(2, '0')).join('');
 const _K = new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
@@ -237,13 +326,7 @@ const Auth = {
     $('tabSignup').onclick = () => this.tab('signup');
     $('fSignup').onsubmit = e => { e.preventDefault(); this.signup(); };
     $('fLogin').onsubmit = e => { e.preventDefault(); this.login(); };
-    $('btnUi').onclick = async () => {
-      const u = Store.cur(); if (!u) return;
-      const toKid = u.prefs.ui !== 'kid';
-      if (await Modal.ask('화면 스타일 바꾸기', toKid ? '🧸 <b>어린이용</b> 화면으로 바꿀까요?<br>큰 글씨, 쉬운 말, 칭찬 중심으로 보여줘요.' : '🎯 <b>일반</b> 화면으로 바꿀까요?<br>자세한 기록과 분석이 보여요.', '바꾸기')) {
-        u.prefs.ui = toKid ? 'kid' : 'normal'; Store.save(); App.show();
-      }
-    };
+    $('btnUi').onclick = () => Settings.open();
     $('btnBackup').onclick = () => Backup.export();
     $('btnRestore').onclick = () => Backup.pick();
     $('btnRestoreA').onclick = () => Backup.pick();
@@ -393,6 +476,201 @@ const Backup = {
   }
 };
 
+// ---------- 성장 기록: 레이팅 · 업적 · 학습 리포트 ----------
+const ACH = [
+  { id: 'first_win', icon: '🥇', name: '첫 승리', desc: '교육이나 대련에서 처음으로 이기기' },
+  { id: 'tut_one', icon: '🎓', name: '첫 졸업', desc: '한 게임의 튜토리얼을 모두 끝내기' },
+  { id: 'tut_all', icon: '📚', name: '네 가지 모두 배움', desc: '네 게임의 튜토리얼을 모두 끝내기' },
+  { id: 'try_all', icon: '🧭', name: '탐험가', desc: '네 게임을 모두 한 판 이상 해보기' },
+  { id: 'beat5', icon: '💪', name: '중급 돌파', desc: '대련에서 Lv.5 이상 AI 이기기' },
+  { id: 'beat8', icon: '🔥', name: '고수 등극', desc: '대련에서 Lv.8 이상 AI 이기기' },
+  { id: 'streak3', icon: '⚡', name: '3연승', desc: '같은 게임 대련에서 3번 연속 이기기' },
+  { id: 'clean', icon: '💎', name: '깔끔한 승리', desc: '분석 결과 큰 실수 없이 이기기' },
+  { id: 'sd_pure', icon: '🧩', name: '스도쿠 장인', desc: '힌트·실수 없이 9×9 스도쿠 완성' },
+  { id: 'games10', icon: '🎯', name: '꾸준함', desc: '교육·대련 10판 하기' },
+  { id: 'games50', icon: '🏆', name: '열정가', desc: '교육·대련 50판 하기' },
+  { id: 'days3', icon: '📅', name: '3일 연속', desc: '3일 연속으로 한 판 이상 하기' }
+];
+const Progress = {
+  aiRating: lv => 450 + lv * 150,
+  rating(u, g) { const r = u.rating && u.rating[g]; return r ? r : { r: 800, n: 0 }; },
+  rate(u, g, lv, result) {
+    const cur = this.rating(u, g), opp = this.aiRating(lv), s = result === 'win' ? 1 : result === 'draw' ? 0.5 : 0;
+    const exp = 1 / (1 + Math.pow(10, (opp - cur.r) / 400)), K = cur.n < 10 ? 48 : 28;
+    const nr = Math.max(100, Math.min(3000, Math.round(cur.r + K * (s - exp))));
+    u.rating = u.rating || {}; u.rating[g] = { r: nr, n: cur.n + 1 };
+    return { from: cur.r, to: nr };
+  },
+  dkey(d) { return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; },
+  days(u) { return [...new Set(u.log.filter(e => e.mode !== 'tutorial').map(e => this.dkey(new Date(e.date))))]; },
+  streak(u) {
+    const set = new Set(this.days(u)); let n = 0; const d = new Date();
+    if (!set.has(this.dkey(d))) d.setDate(d.getDate() - 1);
+    while (set.has(this.dkey(d))) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+  },
+  unlock(u, id, out) { u.ach = u.ach || {}; if (u.ach[id]) return; u.ach[id] = Date.now(); out.push(ACH.find(a => a.id === id)); },
+  check(u, ctx) {
+    const out = [], games = u.log.filter(e => e.mode !== 'tutorial');
+    if (games.some(e => e.result === 'win')) this.unlock(u, 'first_win', out);
+    const tutDone = GAMES.filter(g => LESSONS[g].every((_, i) => u.tut[g].indexOf(i) >= 0)).length;
+    if (tutDone >= 1) this.unlock(u, 'tut_one', out);
+    if (tutDone === GAMES.length) this.unlock(u, 'tut_all', out);
+    if (GAMES.every(g => games.some(e => e.game === g))) this.unlock(u, 'try_all', out);
+    if (games.some(e => e.mode === 'match' && e.result === 'win' && e.level >= 5)) this.unlock(u, 'beat5', out);
+    if (games.some(e => e.mode === 'match' && e.result === 'win' && e.level >= 8)) this.unlock(u, 'beat8', out);
+    if (GAMES.some(g => { const m = u.log.filter(e => e.game === g && e.mode === 'match').slice(0, 3); return m.length === 3 && m.every(e => e.result === 'win'); })) this.unlock(u, 'streak3', out);
+    if (games.length >= 10) this.unlock(u, 'games10', out);
+    if (games.length >= 50) this.unlock(u, 'games50', out);
+    if (this.streak(u) >= 3) this.unlock(u, 'days3', out);
+    if (ctx && ctx.clean) this.unlock(u, 'clean', out);
+    if (ctx && ctx.sdPure) this.unlock(u, 'sd_pure', out);
+    if (out.length) Store.save();
+    return out;
+  },
+  achHtml(list) { return list.map(a => `<div class="achnew">🏅 업적 달성 · ${a.icon} <b>${a.name}</b> <span>${a.desc}</span></div>`).join(''); },
+  week(u, from, to) {
+    const L = u.log.filter(e => e.mode !== 'tutorial' && e.date >= from && e.date < to);
+    const acc = L.filter(e => typeof e.acc === 'number');
+    return { n: L.length, w: L.filter(e => e.result === 'win').length, acc: acc.length ? Math.round(acc.reduce((a, e) => a + e.acc, 0) / acc.length) : null, bl: acc.length ? acc.reduce((a, e) => a + (e.bl || 0), 0) / acc.length : null, nAcc: acc.length, by: GAMES.map(g => L.filter(e => e.game === g).length) };
+  },
+  reportHtml(u) {
+    const now = Date.now(), D = 864e5, a = this.week(u, now - 7 * D, now + D), b = this.week(u, now - 14 * D, now - 7 * D), kid = isKid();
+    const trend = a.acc !== null && b.acc !== null ? (a.acc - b.acc >= 3 ? `<span class="w">▲ ${a.acc - b.acc}%p</span>` : b.acc - a.acc >= 3 ? `<span class="lo">▼ ${b.acc - a.acc}%p</span>` : '<span style="color:var(--sub)">비슷해요</span>') : '';
+    const fav = a.n ? GAME_NAME[GAMES[a.by.indexOf(Math.max(...a.by))]] : '-';
+    const st = this.streak(u);
+    const ach = u.ach || {}, got = ACH.filter(x => ach[x.id]).length;
+    const stats = kid
+      ? `<div class="rpgrid"><div><b>${a.n}</b><span>이번 주 한 판</span></div><div><b>${a.w}</b><span>이긴 판</span></div><div><b>${st}일</b><span>연속으로 했어요</span></div><div><b>${got}개</b><span>받은 배지</span></div></div>`
+      : `<div class="rpgrid"><div><b>${a.n}</b><span>최근 7일 대국·퍼즐</span></div><div><b>${a.n ? Math.round(a.w / a.n * 100) + '%' : '-'}</b><span>승률(완성률)</span></div><div><b>${a.acc !== null ? a.acc + '%' : '-'}</b><span>평균 정확도 ${trend}</span></div><div><b>${st}일</b><span>연속 학습 · 많이 한 게임 ${fav}</span></div></div>`;
+    const badges = `<div class="achgrid">${ACH.map(x => `<div class="ach ${ach[x.id] ? 'on' : ''}" title="${x.desc}"><div class="ai">${ach[x.id] ? x.icon : '🔒'}</div><div class="an">${x.name}</div></div>`).join('')}</div>`;
+    const note = a.acc !== null ? `<div class="rpnote">${kid ? `한 판에 조심할 수가 평균 <b>${a.bl.toFixed(1)}개</b> 있었어요.` : `판당 큰 실수 평균 <b>${a.bl.toFixed(1)}개</b> (분석된 ${a.nAcc}판 기준)`}${b.acc !== null ? ` · 지난주 정확도 ${b.acc}%` : ''}</div>` : `<div class="rpnote">${kid ? '연습하기·겨루기를 하면 여기에 실력 변화가 보여요!' : '교육·대련을 하면 대국 후 분석 결과로 정확도 추이가 쌓여요.'}</div>`;
+    return stats + note + `<div class="rpsub">업적 ${got} / ${ACH.length}</div>` + badges;
+  }
+};
+// ---------- 효과음 (외부 파일 없이 WebAudio로 합성 · 오프라인 동작) ----------
+const Sound = {
+  ctx: null,
+  enabled() { const u = Store.cur(); return !u || u.prefs.sound !== false; },
+  ac() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { this.ctx = new AC(); } catch (e) { return null; }
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    return this.ctx;
+  },
+  tone(a, f, t, dur, type, vol, f2) {
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + dur + 0.02);
+  },
+  knock(a, t, freq, vol, dur) {
+    const len = Math.max(1, Math.floor(a.sampleRate * dur)), buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 4);
+    const s = a.createBufferSource(), bp = a.createBiquadFilter(), g = a.createGain();
+    bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.4; g.gain.value = vol;
+    s.buffer = buf; s.connect(bp); bp.connect(g); g.connect(a.destination); s.start(t);
+  },
+  play(kind) {
+    if (!this.enabled()) return;
+    const a = this.ac(); if (!a) return;
+    const t = a.currentTime + 0.01, v = isKid() ? 0.22 : 0.16;
+    try {
+      switch (kind) {
+        case 'move': this.knock(a, t, 1500, v * 4, 0.07); break;
+        case 'stone': this.knock(a, t, 2400, v * 4.5, 0.05); this.knock(a, t + 0.005, 900, v * 2, 0.06); break;
+        case 'capture': this.knock(a, t, 1300, v * 4, 0.07); this.tone(a, 240, t + 0.03, 0.16, 'triangle', v, 120); break;
+        case 'lose': this.knock(a, t, 900, v * 3, 0.08); this.tone(a, 330, t + 0.04, 0.22, 'sine', v * 0.7, 200); break;
+        case 'check': this.tone(a, 880, t, 0.11, 'square', v * 0.45); this.tone(a, 660, t + 0.13, 0.16, 'square', v * 0.45); break;
+        case 'tick': this.tone(a, 1046, t, 0.08, 'sine', v * 0.8); break;
+        case 'err': this.tone(a, 196, t, 0.18, 'sawtooth', v * 0.35, 150); break;
+        case 'pass': this.tone(a, 520, t, 0.14, 'sine', v * 0.6, 440); break;
+        case 'up': this.tone(a, 660, t, 0.1, 'sine', v); this.tone(a, 990, t + 0.1, 0.16, 'sine', v); break;
+        case 'down': this.tone(a, 660, t, 0.1, 'sine', v * 0.8); this.tone(a, 494, t + 0.1, 0.16, 'sine', v * 0.8); break;
+        case 'win': [523, 659, 784, 1046].forEach((f, i) => this.tone(a, f, t + i * 0.11, i === 3 ? 0.45 : 0.14, 'triangle', v)); break;
+        case 'loss': [392, 330, 262].forEach((f, i) => this.tone(a, f, t + i * 0.16, 0.24, 'sine', v * 0.8)); break;
+        case 'draw': this.tone(a, 523, t, 0.18, 'sine', v); this.tone(a, 523, t + 0.2, 0.25, 'sine', v); break;
+      }
+    } catch (e) { /* 소리는 부가 기능 */ }
+  }
+};
+// ---------- 설정 ----------
+const Settings = {
+  open() {
+    const u = Store.cur(); if (!u) return;
+    const m = $('modal');
+    const tg = (id, on, label) => `<button id="${id}" class="${on ? 'on' : ''}">${label}</button>`;
+    m.innerHTML = `<div class="mbox setbox" role="dialog" aria-label="설정"><div class="mt">⚙️ 설정</div>
+      <div class="setsec"><div class="sett">🔊 효과음</div><div class="tog">${tg('stSndOn', u.prefs.sound !== false, '켜기')}${tg('stSndOff', u.prefs.sound === false, '끄기')}<button id="stSndTest">▶ 들어보기</button></div></div>
+      <div class="setsec"><div class="sett">💬 알림 말풍선</div><div class="tog">${tg('stNtAll', u.prefs.notify === 'all', '모두')}${tg('stNtKey', u.prefs.notify === 'key', '중요한 것만')}${tg('stNtOff', u.prefs.notify === 'off', '끄기')}</div><div class="sethelp">잡기·장군 같은 알림을 얼마나 보여줄지 정해요. 끄더라도 판 위 표시와 기록은 그대로예요.</div></div>
+      <div class="setsec"><div class="sett">🐢 AI 두는 속도</div><div class="tog">${tg('stSpFast', u.prefs.aiSpeed === 'fast', '빠르게')}${tg('stSpNorm', u.prefs.aiSpeed === 'normal', '보통')}${tg('stSpSlow', u.prefs.aiSpeed === 'slow', '천천히')}</div><div class="sethelp">AI 수가 너무 빨리 지나가 놓친다면 '천천히'를 골라 보세요.</div></div>
+      <div class="setsec"><div class="sett">🎨 화면 스타일</div><div class="tog">${tg('stKid', u.prefs.ui === 'kid', '🧸 어린이용')}${tg('stNormal', u.prefs.ui !== 'kid', '🎯 일반')}</div></div>
+      <div class="setsec"><div class="sett">✏️ 닉네임</div><div class="setrow"><input type="text" id="stNick" maxlength="12" value="${esc(u.nick)}" aria-label="새 닉네임"><button id="stNickSave" class="primary">저장</button></div></div>
+      <div class="setsec"><div class="sett">🔑 비밀번호 바꾸기</div>
+        <input type="password" id="stPwCur" maxlength="64" placeholder="지금 비밀번호" aria-label="지금 비밀번호" autocomplete="current-password">
+        <input type="password" id="stPwNew" maxlength="64" placeholder="새 비밀번호 (6자 이상)" aria-label="새 비밀번호" autocomplete="new-password" style="margin-top:6px">
+        <input type="password" id="stPwNew2" maxlength="64" placeholder="새 비밀번호 확인" aria-label="새 비밀번호 확인" autocomplete="new-password" style="margin-top:6px">
+        <button id="stPwSave" style="width:100%;margin-top:6px">비밀번호 변경</button></div>
+      <details class="setsec"><summary class="sett" style="cursor:pointer">🗑️ 이 기기에서 계정 삭제</summary>
+        <div style="font-size:12.5px;color:var(--sub);margin:6px 0">계정과 모든 기록이 이 기기에서 지워져요. 되돌릴 수 없으니 먼저 <b>💾 백업</b>을 권장해요.</div>
+        <input type="password" id="stDelPw" maxlength="64" placeholder="비밀번호 입력" aria-label="계정 삭제 확인용 비밀번호" autocomplete="current-password">
+        <button id="stDel" class="danger" style="width:100%;margin-top:6px">계정 삭제</button></details>
+      <div class="amsg" id="stMsg"></div>
+      <div class="rbtns"><button id="stClose" class="primary">닫기</button></div></div>`;
+    m.classList.remove('hidden');
+    const msg = (t, ok) => { const e = $('stMsg'); e.textContent = t; e.className = 'amsg' + (ok ? ' ok' : ''); };
+    const close = () => { m.classList.add('hidden'); m.innerHTML = ''; document.removeEventListener('keydown', key); App.show(); };
+    const key = e => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', key);
+    m.onclick = e => { if (e.target === m) close(); };
+    $('stClose').onclick = close;
+    const group = (ids, pick) => ids.forEach(([id]) => $(id).classList.toggle('on', id === pick));
+    const setSnd = on => { u.prefs.sound = on; Store.save(); group([['stSndOn'], ['stSndOff']], on ? 'stSndOn' : 'stSndOff'); if (on) Sound.play('win'); };
+    $('stSndOn').onclick = () => setSnd(true); $('stSndOff').onclick = () => setSnd(false);
+    $('stSndTest').onclick = () => { if (u.prefs.sound === false) { msg('효과음이 꺼져 있어요.'); return; } Sound.play('capture'); setTimeout(() => Sound.play('win'), 350); };
+    const NT = [['stNtAll', 'all'], ['stNtKey', 'key'], ['stNtOff', 'off']];
+    NT.forEach(([id, v]) => { $(id).onclick = () => { u.prefs.notify = v; Store.save(); group(NT, id); if (v !== 'off') Notify.show({ kind: 'good', icon: '💬', title: '이렇게 알려 드려요', sub: v === 'all' ? '모든 알림' : '잡기·장군 같은 중요한 알림만', force: true }); }; });
+    const SP = [['stSpFast', 'fast'], ['stSpNorm', 'normal'], ['stSpSlow', 'slow']];
+    SP.forEach(([id, v]) => { $(id).onclick = () => { u.prefs.aiSpeed = v; Store.save(); group(SP, id); }; });
+    const setUi = ui => { u.prefs.ui = ui; Store.save(); document.body.classList.toggle('kid', ui === 'kid'); group([['stKid'], ['stNormal']], ui === 'kid' ? 'stKid' : 'stNormal'); msg('화면 스타일을 바꿨어요.', true); };
+    $('stKid').onclick = () => setUi('kid'); $('stNormal').onclick = () => setUi('normal');
+    $('stNickSave').onclick = () => {
+      const n = $('stNick').value.trim();
+      if (!n || n.length > 12) return msg('닉네임을 1~12자로 입력해 주세요.');
+      u.nick = n; Store.save(); msg('닉네임을 바꿨어요.', true);
+    };
+    $('stPwSave').onclick = async () => {
+      const cur = $('stPwCur').value, n1 = $('stPwNew').value, n2 = $('stPwNew2').value;
+      if (n1.length < 6) return msg('새 비밀번호는 6자 이상이어야 해요.');
+      if (n1 !== n2) return msg('새 비밀번호 확인이 일치하지 않아요.');
+      $('stPwSave').disabled = true; msg('확인 중...', true);
+      try {
+        if (!u.hash || (await Auth.hash(cur, u.salt)) !== u.hash) { $('stPwSave').disabled = false; return msg('지금 비밀번호가 맞지 않아요.'); }
+        const salt = Auth.salt(), hash = await Auth.hash(n1, salt);
+        u.salt = salt; u.hash = hash; Store.save();
+        ['stPwCur', 'stPwNew', 'stPwNew2'].forEach(id => { $(id).value = ''; });
+        msg('비밀번호를 바꿨어요. 다음 로그인부터 새 비밀번호를 써 주세요.', true);
+      } catch (e) { msg('변경 중 오류가 났어요: ' + (e && e.message || e)); }
+      $('stPwSave').disabled = false;
+    };
+    $('stDel').onclick = async () => {
+      const pw = $('stDelPw').value;
+      if (!pw) return msg('삭제하려면 비밀번호를 입력해 주세요.');
+      try { if (!u.hash || (await Auth.hash(pw, u.salt)) !== u.hash) return msg('비밀번호가 맞지 않아요.'); }
+      catch (e) { return msg('확인 중 오류가 났어요: ' + (e && e.message || e)); }
+      const key2 = u.id.toLowerCase();
+      document.removeEventListener('keydown', key);
+      const ok = await Modal.ask('정말 삭제할까요?', `<b>${esc(u.nick)}</b>(@${esc(u.id)}) 계정과 모든 기록이 이 기기에서 지워져요.`, '삭제', true);
+      if (!ok) { App.show(); return; }
+      delete Store.data.users[key2]; delete Store.data.fails[key2];
+      Store.clearSession(); App.show();
+    };
+  }
+};
 // ---------- 앱 화면 전환 ----------
 const App = {
   init() {
@@ -447,6 +725,7 @@ const Home = {
       <div class="pane-tr"><div class="tlvl"></div></div>
       <div class="pane-m"><label class="l">AI 레벨</label><div class="lvl">${Array.from({ length: 10 }, (_, i) => `<button data-v="${i + 1}">${i + 1}</button>`).join('')}</div></div>
       <div class="pane-o opts">${GAME_OPTS[g]}</div>
+      <div class="pane-r hidden"></div>
       <div class="spacer"></div><button class="primary start">시작</button></div>`).join('');
     document.querySelectorAll('.gcard').forEach(card => {
       const g = card.dataset.g;
@@ -455,10 +734,10 @@ const Home = {
       card.querySelector('.start').onclick = () => this.start(g);
     });
     $('btnHome').onclick = async () => {
-      if (Shell.active && !Shell.ended && Shell.mode !== 'tutorial' && Shell.moveCount() > 1) {
-        if (!(await Modal.ask('홈으로 갈까요?', '진행 중인 판은 기록되지 않아요.', '나가기', true))) return;
-      }
+      const saving = Shell.active && !Shell.ended && Shell.mode !== 'tutorial' && Shell.active.resumeData;
+      if (saving) Shell.autosave();
       Shell.close();
+      if (saving && Resume.get(Shell.game)) Home.flash('💾 대국을 저장했어요. 홈의 <b>▶ 이어하기</b>로 계속할 수 있어요.');
     };
   },
   paintCard(g) {
@@ -474,6 +753,12 @@ const Home = {
     card.querySelectorAll('.tlist li').forEach(li => li.onclick = () => Tutorial.start(g, +li.dataset.i));
     card.querySelector('.tlvl').innerHTML = `시작 레벨: <b>Lv.${u.prefs.train[g]}</b><br><span style="color:var(--sub);font-size:12px">${g === 'sudoku' ? '완성하면 다음 퍼즐이 어려워지고, 포기하면 쉬워져요.' : '좋은 수를 두면 대국 중에 AI가 세지고, 실수하면 약해져요.'}</span>`;
     card.querySelectorAll('.lvl button').forEach(b => b.classList.toggle('on', +b.dataset.v === u.prefs.match[g]));
+    const r = Resume.get(g), pr = card.querySelector('.pane-r');
+    pr.classList.toggle('hidden', !r);
+    if (r) {
+      pr.innerHTML = `<button class="green resbtn">▶ 이어하기 <small>${mn(r.o.mode)} · Lv.${r.o.level} · ${g === 'sudoku' ? Resume.count(r) + '칸 채움' : Resume.count(r) + '수'} · ${Resume.ago(r.ts)}</small></button>`;
+      pr.querySelector('.resbtn').onclick = () => Shell.open(g, Object.assign({}, r.o, { resume: r }));
+    }
     const st = card.querySelector('.start');
     st.textContent = m === 'tutorial' ? (next < 0 ? '튜토리얼 처음부터 복습' : `레슨 ${next + 1} 시작`) : m === 'train' ? `교육 대국 시작 (Lv.${u.prefs.train[g]})` : `대련 시작 (Lv.${u.prefs.match[g]})`;
   },
@@ -489,24 +774,35 @@ const Home = {
     const u = Store.cur(), m = this.mode[g];
     if (m === 'tutorial') { const next = LESSONS[g].findIndex((_, i) => u.tut[g].indexOf(i) < 0); Tutorial.start(g, next < 0 ? 0 : next); return; }
     const o = this.optsFor(g); o.mode = m; o.level = m === 'train' ? u.prefs.train[g] : u.prefs.match[g];
+    if (Resume.get(g)) {
+      Modal.ask('진행 중인 대국이 있어요', '새로 시작하면 저장된 대국은 사라져요.<br>계속하려면 <b>▶ 이어하기</b>를 눌러 주세요.', '새로 시작', true).then(ok => { if (ok) { Resume.clear(g); Shell.open(g, o); } });
+      return;
+    }
     Shell.open(g, o);
+  },
+  flash(html) {
+    let el = $('homeFlash');
+    if (!el) { el = document.createElement('div'); el.id = 'homeFlash'; el.className = 'hflash'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.innerHTML = html; el.classList.add('on');
+    clearTimeout(this._ft); this._ft = setTimeout(() => el.classList.remove('on'), 3200);
   },
   render() {
     const u = Store.cur(); if (!u) return;
     $('hAv').textContent = u.nick.slice(0, 1).toUpperCase(); $('hNick').textContent = u.nick; $('hId').textContent = '@' + u.id;
-    let rows = `<tr><th>게임</th><th>${mn('tutorial')}</th><th>${mn('train')} (시작 레벨)</th><th>${mn('match')} 전적</th><th>${mn('match')} 승률</th><th>이긴 최고 레벨</th></tr>`;
+    let rows = `<tr><th>게임</th><th>${mn('tutorial')}</th><th>${mn('train')} (시작 레벨)</th><th>${mn('match')} 전적</th><th>${mn('match')} 승률</th><th>이긴 최고 레벨</th><th>레이팅</th></tr>`;
     GAMES.forEach(g => {
       const tn = LESSONS[g].length, td = u.tut[g].length, tr = u.stats[g].train, ma = u.stats[g].match, mn = ma.w + ma.l + ma.d;
       const sd = g === 'sudoku';
       rows += `<tr><td><b>${GAME_NAME[g]}</b></td><td><span class="pbar"><i style="width:${td / tn * 100}%"></i></span>${td}/${tn}</td>
         <td>${sd ? `완성 <span class="w">${tr.w}</span>` : `<span class="w">${tr.w}</span>-<span class="lo">${tr.l}</span>-<span class="d">${tr.d}</span>`} · Lv.${u.prefs.train[g]}</td>
         <td>${sd ? `완성 <span class="w">${ma.w}</span> · 포기 <span class="lo">${ma.l}</span>` : `<span class="w">${ma.w}승</span> <span class="lo">${ma.l}패</span> <span class="d">${ma.d}무</span>`}</td>
-        <td>${mn ? Math.round(ma.w / mn * 100) + '%' : '-'}</td><td>${ma.best ? 'Lv.' + ma.best : '-'}</td></tr>`;
+        <td>${mn ? Math.round(ma.w / mn * 100) + '%' : '-'}</td><td>${ma.best ? 'Lv.' + ma.best : '-'}</td><td>${u.rating[g] ? `<b>${u.rating[g].r}</b>` : '<span style="color:var(--sub)">-</span>'}</td></tr>`;
     });
     $('recTable').innerHTML = rows;
     Backup.notice(u);
     $('styleGrid').innerHTML = GAMES.map(g => Style.card(g, u)).join('');
-    $('btnUi').textContent = u.prefs.ui === 'kid' ? '🧸 어린이 화면' : '🎯 일반 화면';
+    $('reportBox').innerHTML = Progress.reportHtml(u);
+    $('btnUi').textContent = '⚙️ 설정';
     GAMES.forEach(g => this.paintCard(g));
     const log = u.log.slice(0, 50);
     $('recentList').innerHTML = log.length ? log.map(e => {
@@ -537,11 +833,64 @@ const Modal = {
 };
 const confirmResign = () => Modal.ask('기권할까요?', '이 판은 패배로 기록돼요.', '기권하기', true);
 
+// ---------- 알림 말풍선 (v0.9): 판을 가리지 않는 상단 알림 + 순서대로 표시 ----------
+// prio: 'feedback' = 내 행동에 대한 답(항상 표시) · 'major' = 중요한 대국 사건 · 'minor' = 작은 사건(설정 '모두'일 때만)
+const Notify = {
+  q: [], cur: null, timer: 0, shownAt: 0,
+  level() { const u = Store.cur(); return u ? u.prefs.notify || 'all' : 'all'; },
+  el() {
+    let w = $('notify');
+    if (!w) {
+      w = document.createElement('div'); w.id = 'notify'; w.setAttribute('aria-hidden', 'true'); document.body.appendChild(w);
+      const live = document.createElement('div'); live.id = 'notifyLive'; live.className = 'sr-only'; live.setAttribute('role', 'status'); live.setAttribute('aria-live', 'polite'); document.body.appendChild(live);
+    }
+    return w;
+  },
+  // o: { kind: good|bad|warn|info, title, sub, chip(html), badge, prio, ms, force }
+  show(o) {
+    const lv = this.level(), prio = o.prio || 'feedback';
+    if (!o.force && ((lv === 'off' && prio !== 'feedback') || (lv === 'key' && prio === 'minor'))) return;
+    const live = $('notifyLive') || (this.el(), $('notifyLive'));
+    if (live) live.textContent = [o.title, o.sub, o.badge].filter(Boolean).join(' · ').replace(/<br\s*\/?>/gi, ' · ').replace(/<[^>]+>/g, '');
+    // 같은 종류가 쌓이지 않게: 대기열에는 최신 1개만 유지, 바로 앞과 같은 알림은 무시
+    if (this.cur && this.cur.title === o.title && this.cur.sub === o.sub) return;
+    this.q = this.q.filter(x => x.prio === 'feedback').slice(-1); this.q.push(o);
+    this.pump();
+  },
+  pump() {
+    if (this.cur) {
+      const minShow = 850, waited = Date.now() - this.shownAt;
+      if (waited < minShow) { clearTimeout(this.timer); this.timer = setTimeout(() => this.next(), minShow - waited); }
+      else this.next();
+      return;
+    }
+    this.next();
+  },
+  next() {
+    clearTimeout(this.timer);
+    const o = this.q.shift(), w = this.el();
+    if (!o) { const c = w.firstElementChild; if (c) { c.classList.add('out'); setTimeout(() => { if (!this.cur) w.innerHTML = ''; }, 220); } this.cur = null; return; }
+    this.cur = o; this.shownAt = Date.now();
+    w.innerHTML = `<div class="ncard ${o.kind || 'info'}">${o.chip ? `<div class="nchips">${o.chip}</div>` : ''}<div class="ntxt"><div class="nt">${o.title}${o.badge ? ` <span class="nbadge">${o.badge}</span>` : ''}</div>${o.sub ? `<div class="ns">${o.sub}</div>` : ''}</div></div>`;
+    const u = Store.cur(), slow = u && u.prefs.aiSpeed === 'slow' ? 1.4 : 1;
+    const ms = (o.ms || (o.kind === 'bad' || o.kind === 'warn' ? 2300 : 1800)) * slow;
+    this.timer = setTimeout(() => { this.cur = null; this.next(); }, ms);
+  },
+  clear() { clearTimeout(this.timer); this.q = []; this.cur = null; const w = $('notify'); if (w) w.innerHTML = ''; }
+};
+// 게임별 기물 아이콘(알림용 작은 칩)
+const Chip = {
+  janggi(p) { const s = p >> 3, t = p & 7, H = { 0: ['', '楚', '士', '象', '馬', '車', '包', '卒'], 1: ['', '漢', '士', '象', '馬', '車', '包', '兵'] }; return `<span class="nchip jg s${s}">${H[s][t]}</span>`; },
+  chess(p) { const G = { 1: '♟', 2: '♞', 3: '♝', 4: '♜', 5: '♛', 6: '♚' }; return `<span class="nchip ch ${(p & 8) ? 'b' : 'w'}">${G[p & 7]}\uFE0E</span>`; },
+  go(c, n) { return Array.from({ length: Math.min(n, 3) }, () => `<span class="nchip go c${c}"></span>`).join('') + (n > 3 ? `<span class="nmore">+${n - 3}</span>` : ''); },
+  vs(a, b) { return `${a}<span class="narrow">→</span>${b}`; }
+};
 // ---------- 게임 셸 ----------
 const Shell = {
   active: null, game: null, ended: false, opts: null, mode: null,
   open(game, opts) {
-    this.game = game; this.opts = opts; this.mode = opts.mode; this.ended = false;
+    Analysis.cancel(); Review.close(); Notify.clear(); this._openSeq = (this._openSeq || 0) + 1;
+    this.game = game; this.opts = Object.assign({}, opts); delete this.opts.resume; this.mode = opts.mode; this.ended = false;
     const u = Store.cur();
     $('home').classList.add('hidden'); $('game').classList.remove('hidden'); $('result').classList.add('hidden');
     $('gTitle').textContent = GAME_NAME[game];
@@ -553,36 +902,113 @@ const Shell = {
     if (this.active) this.active.destroy();
     this.active = { go: GoGame, chess: ChessGame, janggi: JanggiGame, sudoku: SudokuGame }[game];
     if (opts.mode === 'tutorial') Tutorial.paint(game, opts.lesson);
-    this.active.start(opts);
+    try { this.active.start(opts); }
+    catch (e) {
+      if (!opts.resume) throw e;
+      console.error('이어하기 실패:', e);
+      Resume.clear(game);
+      this.open(game, Object.assign({}, opts, { resume: null }));
+      this.toast('저장된 대국을 불러오지 못했어요', '새 대국으로 시작할게요', 'warn');
+      return;
+    }
     window.scrollTo(0, 0);
   },
   close() {
+    Analysis.cancel(); Review.close(); Notify.clear();
     if (this.active) this.active.destroy();
     this.active = null; stopProg();
     $('game').classList.add('hidden'); $('result').classList.add('hidden'); $('home').classList.remove('hidden');
     Home.render();
   },
   moveCount() { return this.active && this.active.moveCount ? this.active.moveCount() : 0; },
+  autosave() {
+    if (!this.active || this.ended || this.mode === 'tutorial' || !this.active.resumeData) return;
+    try { const d = this.active.resumeData(); if (d) Resume.put(this.game, d); } catch (e) { console.warn('자동 저장 실패', e); }
+  },
+  // 설정의 'AI 두는 속도'에 따라 AI 수 전후 대기 시간 조절
+  aiDelay(ms) { const u = Store.cur(), s = u && u.prefs.aiSpeed; return s === 'fast' ? Math.round(ms * 0.4) : s === 'slow' ? Math.round(ms * 2.2) : ms; },
+  canAnalyze() { return !!(this.active && this.active.review && this.mode !== 'tutorial' && this.active.review.len() > 0); },
+  paintAnalysis() {
+    const box = $('rAnalysis'), kid = isKid();
+    if (Review.mod) { Review.paintList(); Review.go(Review.k); }
+    if (!box) return;
+    const st = Analysis.state;
+    if (st === 'running') { box.innerHTML = `<div class="anh">🔍 ${kid ? '내가 둔 수를 살펴보는 중…' : '내 수를 분석하고 있어요…'} ${Math.round(Analysis.progress * 100)}%</div><div class="anbar"><i style="width:${Analysis.progress * 100}%"></i></div>`; return; }
+    if (st === 'skipped') { box.innerHTML = `<div class="anh">📜 ${esc(Analysis.skip || '')}</div>`; return; }
+    if (st !== 'done') { box.innerHTML = st === 'failed' ? '<div class="anh">분석을 완료하지 못했어요. 복기는 볼 수 있어요.</div>' : ''; return; }
+    const S = Analysis.summary(), d = Analysis.data, q = S.q;
+    if (!S.n) { box.innerHTML = `<div class="anh">${S.decided ? '처음부터 승부가 크게 기울어 평가할 수가 없었어요. 복기로 확인해 보세요.' : '분석할 내 수가 없었어요.'}</div>`; return; }
+    if (this._logEntry) {
+      const le = this._logEntry; this._logEntry = null;
+      le.acc = S.acc; le.bl = q.blunder; le.sl = q.slip; Store.save();
+      const uu = Store.cur();
+      if (uu && le.result === 'win' && q.blunder === 0 && S.n >= 8) { const nw = Progress.check(uu, { clean: true }); if (nw.length && $('rAch')) $('rAch').insertAdjacentHTML('beforeend', Progress.achHtml(nw)); }
+    }
+    const mv = this.active.review.moves();
+    const scene = i => { const a = d[i], c = CLS_INFO[a.cls]; return `<li><button class="anjump" data-k="${i + 1}">${mv[i].no}수째 <b>${esc(mv[i].txt)}</b></button> ${c.icon} ${kid ? c.k : c.n} <span style="color:var(--sub)">${kid ? '' : '(' + lossText(a) + ')'}</span>${a.bestTxt ? ` → ${kid ? '더 좋은 수' : '추천'} <b>${esc(a.bestTxt)}</b>` : ''}</li>`; };
+    if (kid) {
+      box.innerHTML = `<div class="anh">🔍 내가 둔 수 살펴보기</div><div class="anq">⭐ 좋은 수 <b>${q.good + q.ok}</b>개 · 🔎 조심할 수 <b>${q.slip + q.blunder}</b>개</div>` +
+        (S.worst.length ? `<ul>${S.worst.slice(0, 2).map(scene).join('')}</ul><div class="anfoot">📜 복기 버튼을 누르면 더 좋은 수를 보여줄게!</div>` : '<div class="anfoot">큰 실수 없이 잘 뒀어! 👏</div>');
+    } else {
+      box.innerHTML = `<div class="anh">📊 내 수 분석 <span style="color:var(--sub);font-weight:500">· ${S.n}수 · 같은 기준(AI 레벨과 무관)</span></div>
+        <div class="anq"><span class="q good">✅ 좋은 수 ${q.good}</span><span class="q ok">👌 무난 ${q.ok}</span><span class="q slip">⚠️ 아쉬움 ${q.slip}</span><span class="q blunder">❌ 큰 실수 ${q.blunder}</span><span class="q acc">정확도 <b>${S.acc}%</b></span></div>${S.decided ? `<div class="anfoot" style="margin-top:2px">승부가 크게 기운 뒤의 ${S.decided}수는 평가에서 뺐어요.</div>` : ''}` +
+        (S.worst.length ? `<div class="anh2">결정적 장면</div><ul>${S.worst.map(scene).join('')}</ul>` : '<div class="anfoot">큰 실수 없이 두었어요. 👏</div>');
+    }
+    box.querySelectorAll('.anjump').forEach(b => b.onclick = () => { Review.open(); Review.go(+b.dataset.k); });
+  },
   status(html, cls) { const s = $('gStatus'); s.className = cls || ''; s.innerHTML = html; },
   info(t) { $('gInfo').innerHTML = t; },
+  // 코치 경고: 판을 가리지 않고 옆 패널에 표시. 기본(Enter)은 '다시 생각하기', 판을 누르면 취소
+  coachAsk(title, html, goLabel, backLabel) {
+    return new Promise(resolve => {
+      const box = $('gCoach'), kid = isKid();
+      box.innerHTML = `<div class="coach cwarn" role="alertdialog" aria-label="${esc(title)}"><div class="ct">${kid ? '🐯 호돌 선생님' : '🧑‍🏫 코치'} · ${title}</div><div>${html}</div>
+        <div class="cwbtns"><button id="cwBack" class="primary">${backLabel || '다시 생각하기'}</button><button id="cwGo" class="ghost">${goLabel || '그래도 두기'}</button></div>
+        <div class="cwhelp">판의 빨간 표시를 확인해 보세요 · 판을 누르면 다시 고를 수 있어요</div></div>`;
+      let done = false;
+      const host = $('boardHost');
+      const fin = v => { if (done) return; done = true; document.removeEventListener('keydown', key); host.removeEventListener('pointerdown', tap, true); if (!v) box.innerHTML = ''; resolve(v); };
+      const key = e => { if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); fin(false); } };
+      const tap = e => { e.stopPropagation(); e.preventDefault(); fin(false); };
+      document.addEventListener('keydown', key);
+      host.addEventListener('pointerdown', tap, true);
+      $('cwBack').onclick = () => fin(false); $('cwGo').onclick = () => fin(true);
+      Sound.play('err');
+      setTimeout(() => { if (!done) { $('cwBack') && $('cwBack').focus({ preventScroll: true }); box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } }, 30);
+    });
+  },
   coach(html) { $('gCoach').innerHTML = html ? `<div class="coach"><div class="ct">${isKid() ? '🐯 호돌 선생님' : '🧑‍🏫 코치'}</div>${html}</div>` : ''; },
   log(html, cls) { const d = document.createElement('div'); d.className = cls || ''; d.innerHTML = html; $('gLog').appendChild(d); $('gLog').scrollTop = 1e9; },
   buttons(list) {
     const box = $('gBtns'); box.innerHTML = '';
     list.filter(Boolean).forEach(b => { const e = document.createElement('button'); e.textContent = b.label; e.id = b.id; if (b.cls) e.className = b.cls; e.onclick = b.on; box.appendChild(e); });
   },
-  toast(main, sub, kind) {
-    const t = $('toast'); t.innerHTML = `<div class="tst ${kind || 'info'}">${main}${sub ? `<small>${sub}</small>` : ''}</div>`;
-    clearTimeout(this._tt); this._tt = setTimeout(() => { t.innerHTML = ''; }, 1750);
+  // (이전 버전 호환) 판 한가운데를 가리던 토스트 대신 상단 알림 사용
+  toast(main, sub, kind, prio) { Notify.show({ title: main, sub, kind: kind || 'info', prio: prio || 'feedback' }); },
+  // 대국 사건 알림 (게임 코드에서 호출)
+  notify(o) { Notify.show(o); },
+  // 대국 사건 효과음 (+ 휴대폰 진동: 장군·체크를 받거나 기물을 잃을 때만 짧게)
+  sfx(kind) {
+    Sound.play(kind);
+    if ((kind === 'lose' || kind === 'check') && Sound.enabled() && navigator.vibrate) { try { navigator.vibrate(kind === 'check' ? [40, 60, 40] : 35); } catch (e) {} }
   },
   // 대국 종료 → 기록 → 피드백 → 결과 화면 (저장이 실패해도 결과는 반드시 표시)
   finish(result, reason, fb) {
     if (this.ended) return;
     this.ended = true; stopProg();
     const g = this.game, lv = this.opts.level, mode = this.mode, u = Store.cur();
+    if (mode !== 'tutorial') Resume.clear(g);
     let stats = null, feed = '', sug = '', nextTrain = null;
     try { if (fb.style && mode !== 'tutorial') Style.add(g, fb.style); } catch (e) { console.error(e); }
     try { stats = Store.record(g, mode, result, { level: lv, endLevel: fb.endLevel || lv, reason, moves: fb.moves || 0, hints: fb.hints || 0, warns: fb.warns || 0 }); } catch (e) { console.error(e); }
+    let rtLine = '', achList = [];
+    try {
+      if (mode === 'match' && stats) {
+        const rr = Progress.rate(u, g, lv, result), d = rr.to - rr.from; Store.save();
+        rtLine = `<div class="rrating">📈 ${GAME_NAME[g]} 레이팅 <b>${rr.from} → ${rr.to}</b> <span class="${d >= 0 ? 'w' : 'lo'}">(${d >= 0 ? '+' : ''}${d})</span></div>`;
+      }
+      achList = Progress.check(u, { sdPure: g === 'sudoku' && result === 'win' && fb.n === 9 && !fb.hints && !fb.mistakes });
+    } catch (e) { console.error(e); }
     if (mode === 'train') {
       const t = u.prefs.train[g];
       if (fb.lvf !== undefined) nextTrain = Math.max(1, Math.min(10, Math.round(fb.lvf + (result === 'win' ? 0.5 : result === 'loss' ? -0.5 : 0))));
@@ -603,14 +1029,31 @@ const Shell = {
       : `${esc(u.nick)}님의 ${GAME_NAME[g]} ${mn(mode)} 기록: ` + (sd ? `<span class="w">완성 ${stats.w}</span> · <span class="lo">포기 ${stats.l}</span>` : `<span class="w">${stats.w}승</span> <span class="lo">${stats.l}패</span> <span class="d">${stats.d}무</span>`);
     const again = mode === 'train' ? `${mn('train')} Lv.${nextTrain}로 다시` : '다시 하기';
     $('result').innerHTML = `<div class="rbox"><div class="remoji">${emoji}</div><div class="rbig ${result}">${big}</div><div class="rreason">${esc(reason)}</div>
-      <div class="rfeed"><h4>💬 AI의 한줄평</h4>${feed}</div>${sug}<div class="rrec">${recLine}</div>
+      <div class="rfeed"><h4>💬 AI의 한줄평</h4>${feed}</div>${this.canAnalyze() ? '<div id="rAnalysis" class="ranal"></div>' : ''}${sug}<div class="rrec">${recLine}</div>${rtLine}<div id="rAch">${Progress.achHtml(achList)}</div>
       <div class="rbtns"><button id="rReview">판 보기</button>${this._sugLv ? `<button id="rLv" class="green">Lv.${this._sugLv}로 하기</button>` : ''}<button id="rAgain" class="primary">${again}</button><button id="rHome">홈으로</button></div></div>`;
-    $('result').classList.remove('hidden');
+    // 마지막 수(외통·체크메이트 등)를 판에서 볼 수 있도록 결과 화면을 잠깐 늦게 띄움. 기권·포기는 바로 표시
+    const quick = /기권|포기/.test(reason), delay = quick ? 0 : this.aiDelay(sd ? 700 : 1300);
+    if (!quick && !sd) {
+      const kid = isKid(), big2 = { win: kid ? '이겼어! 🎉' : '대국 종료 — 승리!', loss: kid ? '아쉽게 졌어' : '대국 종료 — 패배', draw: '대국 종료 — 무승부' }[result];
+      Notify.clear(); Notify.show({ kind: result === 'win' ? 'good' : result === 'loss' ? 'bad' : 'info', title: big2, sub: esc(reason) + ' · 마지막 장면을 확인하세요', prio: 'feedback', ms: delay + 400 });
+    }
+    this.status(`🏁 ${resLabel(g, result, mode)} — ${esc(reason)}`, result === 'loss' ? 'alert' : '');
+    const myOpen = this._openSeq = (this._openSeq || 0) + 1;
+    const reveal = () => { if (this._openSeq !== myOpen || !this.active || !this.ended) return; $('result').classList.remove('hidden'); if (result === 'win') setTimeout(confetti, 250); };
+    if (delay) setTimeout(reveal, delay); else reveal();
     $('rAgain').onclick = () => this.open(g, Object.assign({}, this.opts, mode === 'train' ? { level: nextTrain } : {}));
     $('rHome').onclick = () => this.close();
     if (this._sugLv) $('rLv').onclick = () => { u.prefs.match[g] = this._sugLv; Store.save(); this.open(g, Object.assign({}, this.opts, { level: this._sugLv })); };
-    $('rReview').onclick = () => { $('result').classList.add('hidden'); this.status(`${resLabel(g, result, mode)} — ${esc(reason)}`, result === 'loss' ? 'alert' : ''); };
-    if (result === 'win') setTimeout(confetti, 250);
+    $('rReview').onclick = () => {
+      if (this.canAnalyze()) { Review.open(); return; }
+      $('result').classList.add('hidden'); this.status(`${resLabel(g, result, mode)} — ${esc(reason)}`, result === 'loss' ? 'alert' : '');
+    };
+    if (this.canAnalyze()) {
+      $('rReview').textContent = '📜 복기';
+      this._logEntry = u && u.log && u.log[0] && u.log[0].game === g ? u.log[0] : null;
+      Analysis.start(this.active, () => this.paintAnalysis());
+    }
+    Sound.play(result === 'win' ? 'win' : result === 'loss' ? 'loss' : 'draw');
     if (!sd) this.log(`■ 종료: ${RES_LABEL[result]} (${esc(reason)})`, 'sys');
   }
 };
@@ -630,12 +1073,13 @@ const Tutorial = {
     if (first) { u.tut[g].push(i); Store.save(); }
     const all = LESSONS[g].every((_, k) => u.tut[g].indexOf(k) >= 0);
     if (first && all) Store.record(g, 'tutorial', 'win', { level: 0, reason: `튜토리얼 ${LESSONS[g].length}개 레슨 완료`, moves: 0 });
+    const tAch = first ? Progress.check(u) : [];
     const hasNext = i + 1 < LESSONS[g].length;
-    Shell.toast('정답! 🎉', '', 'good');
+    Shell.toast('정답! 🎉', '', 'good'); Sound.play('win');
     setTimeout(() => {
       $('result').innerHTML = `<div class="rbox"><div class="remoji">${all && first ? '🎓' : '⭐'}</div><div class="rbig win" style="font-size:44px">${all && first ? '튜토리얼 완료!' : '잘했어요!'}</div>
         <div class="rreason">레슨 ${i + 1} · ${LESSONS[g][i].title}</div>
-        <div class="rfeed">${extra || '이번 레슨을 통과했어요.'}${all && first ? `<br><br><b>${GAME_NAME[g]}의 기본을 모두 배웠어요!</b> 이제 <b>교육</b> 모드에서 AI 코치와 함께 실제 대국을 해 보세요.` : ''}</div>
+        <div class="rfeed">${extra || '이번 레슨을 통과했어요.'}${all && first ? `<br><br><b>${GAME_NAME[g]}의 기본을 모두 배웠어요!</b> 이제 <b>교육</b> 모드에서 AI 코치와 함께 실제 대국을 해 보세요.` : ''}</div>${Progress.achHtml(tAch)}
         <div class="rbtns"><button id="tAgain">다시 하기</button>${hasNext ? '<button id="tNext" class="primary">다음 레슨 →</button>' : `<button id="tTrain" class="primary">교육 대국 하러 가기</button>`}<button id="tHome">홈으로</button></div></div>`;
       $('result').classList.remove('hidden');
       if (all && first) setTimeout(confetti, 200);
@@ -645,7 +1089,11 @@ const Tutorial = {
       else $('tTrain').onclick = () => { Home.mode[g] = 'train'; Shell.close(); };
     }, 700);
   },
-  fail(msg) { Shell.toast('다시 해볼까요?', msg || '목표와 다른 수예요', 'warn'); }
+  fail(msg) {
+    const L = Shell.game && LESSONS[Shell.game] && LESSONS[Shell.game][Shell.opts && Shell.opts.lesson];
+    Shell.toast(isKid() ? '아까워! 다시 해 보자' : '다시 해볼까요?', `${msg || '목표와 다른 수예요'}${L ? `<br>🎯 ${L.task}` : ''}<br><span style="opacity:.8">막히면 💡 힌트를 눌러 보세요</span>`, 'warn');
+    Sound.play('err');
+  }
 };
 
 // ---------- 진행 막대 · 워커 ----------
@@ -704,12 +1152,191 @@ function engineCall(ctx, msg, fallback, timeMs, minMs) {
     cancelTimer = setTimeout(() => { if (!done && id === ctx.reqId) failWorker(); }, Math.max(1000, Number(timeMs) || 3000) + 10000);
   });
 }
+// ---------- 보조 계산(코치·힌트)용 Worker: 화면이 멈추지 않도록 백그라운드에서 계산 ----------
+function helperCall(ctx, key, src, msg, fallback, timeMs) {
+  const safe = () => { try { return fallback(); } catch (e) { console.error('보조 계산 대체 실패:', e); return null; } };
+  return new Promise(resolve => {
+    let h = ctx[key];
+    if (!h) {
+      const w = makeWorker(src);
+      if (!w) { setTimeout(() => resolve(safe()), 0); return; }
+      h = ctx[key] = { w, pend: new Map(), n: 0 };
+      const hh = h;
+      w.onmessage = e => { const d = e.data, q = d && hh.pend.get(d.id); if (q) { hh.pend.delete(d.id); clearTimeout(q.t); q.resolve(d.res); } };
+      w.onerror = e => {
+        if (e && e.preventDefault) e.preventDefault();
+        try { w.terminate(); } catch (x) {}
+        if (ctx[key] === hh) ctx[key] = null;
+        hh.pend.forEach(q => { clearTimeout(q.t); q.resolve(q.fb()); }); hh.pend.clear();
+      };
+    }
+    const id = 'h' + (++h.n), hh = h;
+    const t = setTimeout(() => { if (!hh.pend.has(id)) return; hh.pend.delete(id); resolve(safe()); }, (timeMs || 3000) + 5000);
+    h.pend.set(id, { resolve, t, fb: safe });
+    try { h.w.postMessage(Object.assign({ id }, msg)); }
+    catch (e) { h.pend.delete(id); clearTimeout(t); resolve(safe()); }
+  });
+}
+function helperStop(ctx, key) {
+  const h = ctx[key]; if (!h) return;
+  try { h.w.terminate(); } catch (e) {}
+  h.pend.forEach(q => { clearTimeout(q.t); q.resolve(null); }); h.pend.clear();
+  ctx[key] = null;
+}
+// ---------- 대국 후 분석 (AI 레벨과 무관하게 같은 기준으로 내 수를 평가) ----------
+const CLS_INFO = {
+  good: { n: '좋은 수', k: '좋은 수', icon: '✅', cls: 'good' },
+  ok: { n: '무난한 수', k: '괜찮은 수', icon: '👌', cls: 'ok' },
+  slip: { n: '아쉬운 수', k: '아까운 수', icon: '⚠️', cls: 'slip' },
+  blunder: { n: '큰 실수', k: '조심할 수', icon: '❌', cls: 'blunder' }
+};
+function lossText(a) {
+  if (!a) return '';
+  if (a.unit === 'wr') return `승률 -${Math.round(a.loss * 100)}%p`;
+  if (a.loss >= 1500) return '결정적 손해';
+  return a.unit === 'pawn' ? `-${(a.loss / 100).toFixed(1)}폰` : `-${(a.loss / 100).toFixed(1)}점`;
+}
+const Analysis = {
+  token: 0, workers: [], data: null, state: 'idle', progress: 0,
+  cancel() { this.token++; this.workers.forEach(w => { try { w.terminate(); } catch (e) {} }); this.workers = []; this.state = 'idle'; },
+  runPool(jobs, token, onProgress) {
+    return new Promise(resolve => {
+      const list = jobs.list, results = new Array(list.length);
+      if (!list.length) { resolve(results); return; }
+      let next = 0, done = 0, finished = false;
+      const finish = () => { if (finished) return; finished = true; this.workers.forEach(w => { try { w.terminate(); } catch (e) {} }); this.workers = []; resolve(results); };
+      const settle = (i, r) => { if (token !== this.token || finished) return; results[i] = r; done++; onProgress(done / list.length); if (done >= list.length) finish(); };
+      const runLocal = i => setTimeout(() => {
+        if (token !== this.token) return;
+        let r = null; try { r = list[i].local(); } catch (e) { console.warn('분석 대체 계산 실패', e); }
+        settle(i, r); pumpLocal();
+      }, 0);
+      const pumpLocal = () => { if (token !== this.token || finished) return; if (next < list.length) runLocal(next++); };
+      const n = Math.max(1, Math.min(jobs.parallel || 1, list.length));
+      let started = 0;
+      for (let k = 0; k < n; k++) {
+        const w = makeWorker(jobs.src);
+        if (!w) break;
+        started++; this.workers.push(w);
+        let cur = -1, timer = null;
+        const feed = () => {
+          if (token !== this.token || finished) return;
+          if (next >= list.length) return;
+          cur = next++;
+          clearTimeout(timer);
+          timer = setTimeout(() => { try { w.terminate(); } catch (e) {} const i = cur; cur = -1; settle(i, null); pumpLocal(); }, 20000);
+          try { w.postMessage(Object.assign({ id: 'an' + cur }, list[cur].msg)); } catch (e) { clearTimeout(timer); const i = cur; cur = -1; runLocal(i); }
+        };
+        w.onmessage = e => { if (!e.data || e.data.id !== 'an' + cur) return; clearTimeout(timer); const i = cur; cur = -1; settle(i, e.data.res); feed(); };
+        w.onerror = e => { if (e.preventDefault) e.preventDefault(); clearTimeout(timer); try { w.terminate(); } catch (x) {} if (cur >= 0) { const i = cur; cur = -1; runLocal(i); } };
+        feed();
+      }
+      if (!started) pumpLocal();
+    });
+  },
+  async start(mod, onUpdate) {
+    this.cancel();
+    const token = this.token;
+    this.data = null; this.state = 'running'; this.progress = 0;
+    let jobs;
+    try { jobs = mod.review.jobs(); } catch (e) { console.error(e); this.state = 'failed'; onUpdate(); return; }
+    if (jobs.skip) { this.state = 'skipped'; this.skip = jobs.skip; onUpdate(); return; }
+    if (!jobs.list.length) { this.state = 'empty'; onUpdate(); return; }
+    const results = await this.runPool(jobs, token, p => { this.progress = p; onUpdate(); });
+    if (token !== this.token) return;
+    try { this.data = mod.review.judge(jobs, results); this.state = 'done'; }
+    catch (e) { console.error('분석 결과 해석 실패', e); this.state = 'failed'; }
+    onUpdate();
+  },
+  summary() {
+    const d = this.data || {}, q = { good: 0, ok: 0, slip: 0, blunder: 0 }, all = Object.keys(d).map(Number), keys = all.filter(i => !d[i].decided);
+    keys.forEach(i => q[d[i].cls]++);
+    const n = keys.length, decided = all.length - keys.length, acc = n ? Math.round((q.good + q.ok * 0.8 + q.slip * 0.4) / n * 100) : 0;
+    const worst = keys.filter(i => d[i].cls === 'blunder' || d[i].cls === 'slip').sort((a, b) => d[b].loss - d[a].loss).slice(0, 3);
+    return { q, n, acc, worst, decided };
+  }
+};
+// ---------- 복기 화면 ----------
+const Review = {
+  k: 0, mod: null, keyH: null,
+  open() {
+    const mod = Shell.active; if (!mod || !mod.review || !mod.review.len()) return;
+    this.mod = mod; $('result').classList.add('hidden'); Notify.clear();
+    const kid = isKid();
+    $('gBtns').classList.add('rv'); document.body.classList.add('reviewing');
+    Shell.buttons([
+      { id: 'rvFirst', label: '⏮ 처음', on: () => this.go(0) },
+      { id: 'rvPrev', label: '◀ 이전', on: () => this.go(this.k - 1) },
+      { id: 'rvNext', label: '다음 ▶', cls: 'primary', on: () => this.go(this.k + 1) },
+      { id: 'rvBad', label: kid ? '🔎 조심할 수' : '⚠️ 다음 실수', on: () => this.nextMistake() },
+      { id: 'rvLast', label: '마지막 ⏭', on: () => this.go(mod.review.len()) },
+      { id: 'rvRes', label: '결과 보기', on: () => { $('result').classList.remove('hidden'); } }
+    ]);
+    if (this.keyH) document.removeEventListener('keydown', this.keyH);
+    this.keyH = e => {
+      if (!this.mod || !$('result').classList.contains('hidden') || !$('modal').classList.contains('hidden')) return;
+      if (e.key === 'ArrowLeft') { this.go(this.k - 1); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { this.go(this.k + 1); e.preventDefault(); }
+    };
+    document.addEventListener('keydown', this.keyH);
+    this.paintList();
+    this.go(Math.min(1, mod.review.len()));
+  },
+  close() { if (this.keyH) document.removeEventListener('keydown', this.keyH); this.keyH = null; this.mod = null; $('gBtns').classList.remove('rv'); document.body.classList.remove('reviewing'); },
+  paintList() {
+    if (!this.mod) return;
+    const mv = this.mod.review.moves(), d = Analysis.data || {}, kid = isKid();
+    const head = Analysis.state === 'running' ? `<div class="rvnote">🔍 내 수 분석 중… ${Math.round(Analysis.progress * 100)}%</div>` : Analysis.state === 'skipped' ? `<div class="rvnote">${esc(Analysis.skip || '')}</div>` : '';
+    $('gExtra').innerHTML = `<div class="card rvbox"><div class="wrl" style="margin-bottom:6px"><span><b>📜 복기</b> · ← → 키로 이동</span><span id="rvPos"></span></div>${head}<div class="rvlist" id="rvList">${mv.map((m, i) => {
+      const a = d[i] && !d[i].decided ? d[i] : null, c = a ? CLS_INFO[a.cls] : null;
+      return `<button class="rvm ${m.h ? 'me' : 'ai'} ${c ? 'c-' + c.cls : ''}" data-k="${i + 1}" title="${c ? (kid ? c.k : c.n) : ''}"><span class="rvn">${esc(m.lab)}</span>${esc(m.txt)}${c && a.cls !== 'good' && a.cls !== 'ok' ? ` <i>${c.icon}</i>` : ''}</button>`;
+    }).join('')}</div></div>`;
+    $('rvList').onclick = e => { const b = e.target.closest('.rvm'); if (b) this.go(+b.dataset.k); };
+  },
+  go(k) {
+    if (!this.mod) return;
+    const N = this.mod.review.len();
+    k = Math.max(0, Math.min(N, k)); this.k = k;
+    const d = Analysis.data || {}, a = k > 0 ? d[k - 1] : null;
+    this.mod.review.show(k, a && a.best && a.cls !== 'good' ? a.best : 0);
+    const mv = this.mod.review.moves(), kid = isKid();
+    let html;
+    if (k === 0) html = '처음 배치예요. <b>다음 ▶</b>을 눌러 한 수씩 넘겨 보세요.';
+    else {
+      const m = mv[k - 1];
+      html = `<b>${m.no}수째 · ${m.h ? '내 수' : 'AI 수'}</b>: ${esc(m.txt)}`;
+      if (a && a.decided) html += `<br><span style="color:var(--sub)">이미 승부가 크게 기운 뒤라 평가에서 뺐어요.</span>${a.best && a.cls !== 'good' ? `<br>💡 추천 수: <b>${esc(a.bestTxt)}</b>` : ''}`;
+      else if (a) {
+        const c = CLS_INFO[a.cls];
+        html += `<br>${c.icon} <b>${kid ? c.k : c.n}</b>${a.cls === 'good' ? '' : ` <span style="color:var(--sub)">(${lossText(a)})</span>`}`;
+        if (a.best && a.cls !== 'good') html += `<br>💡 ${kid ? '이렇게 두면 더 좋았어' : '추천 수'}: <b>${esc(a.bestTxt)}</b> <span style="color:var(--sub)">(파란 표시)</span>`;
+      } else if (m.h && Analysis.state === 'running') html += '<br><span style="color:var(--sub)">분석 중이에요…</span>';
+    }
+    Shell.coach(html);
+    Shell.status(`📜 복기 ${k} / ${N}`, '');
+    const pos = $('rvPos'); if (pos) pos.textContent = `${k} / ${N}`;
+    document.querySelectorAll('#rvList .rvm').forEach(b => b.classList.toggle('cur', +b.dataset.k === k));
+    const cur = document.querySelector('#rvList .rvm.cur'); if (cur) cur.scrollIntoView({ block: 'nearest' });
+    if ($('rvPrev')) $('rvPrev').disabled = k <= 0;
+    if ($('rvNext')) $('rvNext').disabled = k >= N;
+  },
+  nextMistake() {
+    const d = Analysis.data || {};
+    const idx = Object.keys(d).map(Number).filter(i => !d[i].decided && (d[i].cls === 'blunder' || d[i].cls === 'slip') && i + 1 > this.k).sort((a, b) => a - b)[0];
+    if (idx === undefined) { Shell.toast(Analysis.state === 'running' ? '아직 분석 중이에요' : '더 이상 실수가 없어요', '', 'info'); return; }
+    this.go(idx + 1);
+  }
+};
 // ---------- 교육 모드: 대국 중 실력에 맞춰 AI 레벨 조절 ----------
 // 사람이 둔 수마다 품질(좋음/보통/아쉬움/큰 실수)을 매겨 레벨 값을 올리고 내림
 const Adapt = {
   STEP: { good: 0.34, ok: 0, slip: -0.4, blunder: -0.8 },
   init(G, base) { G.lvf = base; G.lvNow = base; G.lvPath = [base]; G.quality = { good: 0, ok: 0, slip: 0, blunder: 0 }; G.hintThisTurn = false; },
-  classify(loss, th) { if (loss <= th[0]) return 'good'; if (loss <= th[1]) return 'ok'; if (loss <= th[2]) return 'slip'; return 'blunder'; },
+  // rank: 내 수보다 평가가 높은 후보 수의 개수(0 = 최선). 손실이 작아도 상위 3수 안이 아니면 '좋은 수'로 보지 않음
+  classify(loss, th, rank) {
+    if (loss <= th[0] && (rank === undefined || rank === null || rank < 3 || loss <= th[0] / 4)) return 'good';
+    if (loss <= th[1]) return 'ok'; if (loss <= th[2]) return 'slip'; return 'blunder';
+  },
   step(G, q) {
     if (!G || G.mode !== 'train' || !q) return;
     G.quality[q]++;
@@ -719,9 +1346,9 @@ const Adapt = {
     G.lvf = Math.max(1, Math.min(10, G.lvf + d));
     const nl = Math.round(G.lvf);
     if (nl !== G.lvNow) {
-      const up = nl > G.lvNow; G.lvNow = nl; G.lvPath.push(nl);
-      if (isKid()) Shell.toast(up ? `AI가 더 세졌어! ⬆` : `AI가 조금 쉬워졌어 ⬇`, up ? '네가 잘하고 있어서 그래!' : '천천히 해 보자', up ? 'good' : 'info');
-      else Shell.toast(`AI 레벨 ${up ? '⬆' : '⬇'} Lv.${nl}`, up ? '좋은 수가 이어져서 더 세게 둘게요' : '조금 쉽게 둘게요', up ? 'good' : 'info');
+      const up = nl > G.lvNow; G.lvNow = nl; G.lvPath.push(nl); Sound.play(up ? 'up' : 'down');
+      if (isKid()) Shell.toast(up ? `AI가 더 세졌어! ⬆` : `AI가 조금 쉬워졌어 ⬇`, up ? '네가 잘하고 있어서 그래!' : '천천히 해 보자', up ? 'good' : 'info', 'major');
+      else Shell.toast(`AI 레벨 ${up ? '⬆' : '⬇'} Lv.${nl}`, up ? '좋은 수가 이어져서 더 세게 둘게요' : '조금 쉽게 둘게요', up ? 'good' : 'info', 'major');
       Shell.log(`· AI 레벨 ${up ? '상승' : '하락'} → Lv.${nl}`, 'sys');
     }
     this.paint(G);
@@ -804,17 +1431,10 @@ const Feedback = {
     if (game === 'sudoku') return this.sudoku(mode, result, fb, nextTrain);
     const lines = [], n = fb.moves || 0, lv = Shell.opts.level;
     if (/기권/.test(reason) && result === 'loss') lines.push(`${n}수에서 기권했어요. 어디서 흐름이 기울었는지 짚어볼게요.`);
-    else if (result === 'win') lines.push(this.pick([`${n}수 만에 AI Lv.${lv}을 꺾었어요. 흐름을 끝까지 놓치지 않았어요.`, `깔끔한 승리예요. 결정적인 순간을 잘 잡아냈어요.`]));
-    else if (result === 'loss') lines.push(this.pick([`${n}수 대국이었어요. 한 번의 흔들림이 크게 이어졌어요.`, `아쉬운 패배예요. 흐름이 기울어진 지점을 짚어볼게요.`]));
+    else if (result === 'win') lines.push(`${n}수 만에 AI Lv.${lv}을 이겼어요! 🎉`);
+    else if (result === 'loss') lines.push(`${n}수 대국이었어요. 아래 분석에서 흐름이 바뀐 수를 확인해 보세요.`);
     else lines.push(`비긴 판이에요. ${n}수 동안 팽팽하게 맞섰어요.`);
     const ul = [];
-    const bl = (fb.blunders || []).slice().sort((a, b) => b.drop - a.drop);
-    if (bl.length) {
-      ul.push(`<b>결정적 장면</b>: ${bl[0].no}수째 ${bl[0].text}`);
-      if (bl.length >= 3) ul.push(`형세가 크게 흔들린 수가 <b>${bl.length}번</b> 있었어요. 두기 전에 상대가 바로 잡을 수 있는 기물이 없는지 한 번 더 확인해 보세요.`);
-    } else if (result !== 'win' && n > 10) ul.push('눈에 띄는 큰 실수 없이 조금씩 밀렸어요.');
-    else if (result === 'win' && n > 10) ul.push('큰 실수 없이 안정적으로 운영했어요.');
-    if (fb.best) ul.push(`<b>좋았던 수</b>: ${fb.best.no}수째 ${fb.best.text}`);
     (fb.extra || []).forEach(x => ul.push(x));
     if (mode === 'train') {
       const parts = [];

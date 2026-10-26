@@ -21,9 +21,9 @@ const context = vm.createContext({
   Blob, URL, Intl, Map, Set, Promise
 });
 vm.runInContext(fs.readFileSync(require.resolve('../js/lessons.js'), 'utf8'), context);
-const core = fs.readFileSync(require.resolve('../js/core.js'), 'utf8') + '\n;globalThis.__test = { Store, Backup };';
+const core = fs.readFileSync(require.resolve('../js/core.js'), 'utf8') + '\n;globalThis.__test = { Store, Backup, Adapt, Progress, Resume };';
 vm.runInContext(core, context);
-const { Store, Backup } = context.__test;
+const { Store, Backup, Adapt, Progress, Resume } = context.__test;
 
 // Corrupt JSON must not crash startup or leave an unusable root object.
 localStorage.setItem('boardArena.v3', '{bad json');
@@ -87,6 +87,38 @@ sessionStorage.setItem('boardArena.session', 'deleteduser');
 assert.equal(Store.sessionId(), 'tester', 'invalid tab session must fall back to valid persistent session');
 assert.equal(sessionStorage.getItem('boardArena.session'), null);
 
+// v0.8+: 이어하기 · 레이팅 · 업적 · 분석 결과 · 환경설정도 정규화
+const v8 = Store.migrate({
+  id: 'Tester', nick: 'x', prefs: { notify: '<x>', aiSpeed: 'warp' },
+  resume: {
+    chess: { o: { mode: 'match', level: 99, human: 8, evil: '<script>' }, moves: [1, 2], ts: 5 },
+    janggi: { o: { mode: 'evil' }, moves: [] },
+    go: { o: { mode: 'train', size: 77, komi: '<script>' }, moves: ['x'] },
+    sudoku: { o: { mode: 'train', level: 3 }, pz: { n: 4 } }
+  },
+  rating: { chess: { r: 99999, n: 'x' }, go: { r: 'bad' } },
+  ach: { first_win: 123, hacked: 1 },
+  log: [{ game: 'chess', mode: 'match', result: 'win', date: 1, acc: 150, bl: -3 }, { game: 'go', mode: 'match', result: 'loss', date: 2 }]
+});
+assert.equal(v8.prefs.sound, true, 'sound defaults to on');
+assert.equal(v8.prefs.notify, 'all'); assert.equal(v8.prefs.aiSpeed, 'normal');
+assert.deepEqual(Object.keys(v8.resume).sort(), ['chess', 'sudoku'], 'invalid resume entries are dropped');
+assert.equal(v8.resume.chess.o.level, 10); assert.equal(v8.resume.chess.o.human, 8); assert.equal(v8.resume.chess.o.evil, undefined);
+assert.equal(v8.rating.chess.r, 3000); assert.equal(v8.rating.chess.n, 0); assert.equal(v8.rating.go, undefined);
+assert.deepEqual(Object.keys(v8.ach), ['first_win']);
+assert.equal(v8.log[0].acc, 100); assert.equal(v8.log[0].bl, 0); assert.equal(v8.log[1].acc, undefined);
+assert.equal(Resume.cleanOpts('go', { mode: 'match', size: '13', hcp: 1, komi: 6.5 }).komi, '6.5');
+assert.equal(Resume.cleanOpts('janggi', { mode: 'match', pat: 'x' }).pat, '마상마상');
+const th = [40, 150, 300];
+assert.equal(Adapt.classify(30, th, 1), 'good');
+assert.equal(Adapt.classify(30, th, 6), 'ok', 'small loss but far from best candidates is not "good"');
+assert.equal(Adapt.classify(5, th, 9), 'good');
+assert.equal(Adapt.classify(400, th, 0), 'blunder');
+const ru = { rating: {} };
+const up = Progress.rate(ru, 'chess', 5, 'win'); assert.ok(up.to > up.from);
+const dn = Progress.rate(ru, 'chess', 1, 'loss'); assert.ok(dn.to < dn.from);
+console.log('PASS: resume/rating/achievement/analysis/preference normalization');
+console.log('PASS: move classification and rating rules');
 console.log('PASS: corrupted storage recovery and schema normalization');
 console.log('PASS: backup data validation and invalid-record filtering');
 console.log('PASS: persistent-login session precedence regression');

@@ -1,6 +1,6 @@
 {
   "name": "hansu-board-arena",
-  "version": "0.7.0",
+  "version": "0.9.0",
   "description": "한수 - 보드게임 학습 앱",
   "private": true,
   "main": "desktop/main.cjs",
@@ -8,7 +8,8 @@
     "start": "electron .",
     "dist:win": "electron-builder --win nsis --x64",
     "dist:mac": "electron-builder --mac dmg",
-    "dist:linux": "electron-builder --linux AppImage"
+    "dist:linux": "electron-builder --linux AppImage",
+    "test": "node tests/static-integrity.cjs && node tests/smoke-engines.cjs && node tests/rules-regression.cjs && node tests/lessons-regression.cjs && node tests/storage-regression.cjs"
   },
   "devDependencies": {
     "electron": "^36.0.0",
@@ -18,12 +19,15 @@
     "appId": "kr.hansu.boardarena",
     "productName": "한수",
     "asar": true,
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "index.html",
       "css/**/*",
       "js/**/*",
       "workers/**/*",
+      "icons/**/*",
       "manifest.webmanifest",
       "desktop/**/*",
       "package.json",
@@ -32,7 +36,15 @@
       "!service-worker.js"
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icons/icon-512.png"
     },
     "nsis": {
       "oneClick": false,
@@ -41,7 +53,17 @@
       "createStartMenuShortcut": true,
       "shortcutName": "한수"
     },
-    "mac": { "target": ["dmg"] },
-    "linux": { "target": ["AppImage"] }
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "icons/icon-512.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "icons/icon-512.png"
+    }
   }
 }
